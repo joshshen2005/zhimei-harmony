@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="知美 AI 客服副驾比赛级可运行原型" />
+    <title>知美 AI 客服副驾</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">知</div>
+          <div>
+            <h1>知美 AI 客服副驾</h1>
+            <p>消费者处境理解与服务闭环</p>
+          </div>
+        </div>
+        <div class="topbar-center" aria-label="当前工作区">
+          <span class="topbar-section active">接待工作台</span>
+          <span class="topbar-section">风险中心</span>
+          <span class="topbar-section">经验库</span>
+        </div>
+        <div class="topbar-status">
+          <span class="environment-badge">MOCK DATA</span>
+          <span class="mode-badge">离线复盘模式</span>
+          <span id="clock" class="clock"></span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="session-panel" aria-label="消费者会话列表">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">客户接待</span>
+              <h2>接待队列</h2>
+              <p>按风险和时间处理当前会话</p>
+            </div>
+            <span id="session-count" class="count-badge">0</span>
+          </div>
+          <div id="queue-summary" class="queue-summary" aria-label="队列风险概况"></div>
+          <div class="session-controls">
+            <label class="search-box">
+              <span class="sr-only">搜索会话</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+              <input id="session-search" type="search" placeholder="搜索会话、场景或消息" />
+            </label>
+            <select id="scene-filter" aria-label="按场景筛选">
+              <option value="">全部场景</option>
+            </select>
+          </div>
+          <div id="session-list" class="session-list"></div>
+        </aside>
+
+        <section class="conversation-panel" aria-label="客服聊天工作区">
+          <div id="conversation-header" class="conversation-header"></div>
+          <div id="order-strip" class="order-strip"></div>
+          <div id="conversation-context" class="conversation-context"></div>
+          <div id="message-list" class="message-list" aria-live="polite"></div>
+          <div class="composer">
+            <div class="composer-toolbar">
+              <span>人工回复</span>
+              <span id="draft-source" class="draft-source">等待客服输入</span>
+            </div>
+            <textarea id="reply-input" rows="3" placeholder="请输入回复内容。AI 草稿不会自动发送。"></textarea>
+            <div class="composer-actions">
+              <button id="clear-reply" class="button secondary" type="button">清空</button>
+              <button id="simulate-send" class="button primary" type="button">模拟发送</button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="copilot-panel" aria-label="知美 AI 客服副驾插件">
+          <div class="copilot-heading">
+            <div>
+              <span class="eyebrow">AI COPILOT</span>
+              <h2>知美副驾</h2>
+              <p id="copilot-session">当前会话分析</p>
+            </div>
+            <div id="analysis-state" class="analysis-state"><span></span>分析完成</div>
+          </div>
+          <div class="workflow-steps" aria-label="AI辅助流程">
+            <div class="workflow-step completed"><span>1</span><b>理解</b></div>
+            <div class="workflow-line"></div>
+            <div class="workflow-step completed"><span>2</span><b>核验</b></div>
+            <div class="workflow-line"></div>
+            <div class="workflow-step active"><span>3</span><b>行动</b></div>
+            <div class="workflow-line"></div>
+            <div class="workflow-step"><span>4</span><b>跟进</b></div>
+          </div>
+          <nav class="tab-list" aria-label="副驾功能">
+            <button class="tab-button active" data-tab="assist" type="button"><span>当前处理</span><small>理解与决策</small></button>
+            <button class="tab-button" data-tab="risk" type="button"><span>跟进任务</span><small>风险与承诺</small></button>
+            <button class="tab-button" data-tab="case" type="button"><span>经验参考</span><small>案例与审核</small></button>
+          </nav>
+          <div id="copilot-content" class="copilot-content"></div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <script src="data.js"></script>
+    <script src="core.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
