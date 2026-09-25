@@ -2,6 +2,8 @@
 
 这是基于赛事 MOCK DATA 构建的可运行 Web 插件 MVP。它模拟千牛式三栏客服工作台，并在右侧提供消费者处境理解、跨源事实核验、回复草稿、风险跟进和案例沉淀。
 
+在线演示：[Zhimei Harmony](https://joshshen2005.github.io/zhimei-harmony/)
+
 ## 已实现
 
 - 导入998条聊天消息、113笔订单及五类共80张工单。
