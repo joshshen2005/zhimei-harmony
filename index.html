@@ -22,7 +22,7 @@
         </div>
         <div class="topbar-status">
           <span class="environment-badge">MOCK DATA</span>
-          <span class="mode-badge">离线复盘模式</span>
+          <span class="mode-badge">规则兜底 + OpenAI</span>
           <span id="clock" class="clock"></span>
         </div>
       </header>
@@ -76,7 +76,7 @@
               <h2>知美副驾</h2>
               <p id="copilot-session">当前会话分析</p>
             </div>
-            <div id="analysis-state" class="analysis-state"><span></span>分析完成</div>
+            <button id="analysis-state" class="analysis-state" type="button" title="配置或检查AI连接"><span></span><b>本地规则</b></button>
           </div>
           <nav class="module-nav" aria-label="单页功能导航">
             <button data-jump="module-overview" type="button">总览</button>
@@ -100,9 +100,25 @@
         <div id="case-modal-content" class="modal-content"></div>
       </section>
     </div>
+    <div id="ai-config-modal" class="modal-overlay" hidden>
+      <section class="case-modal ai-config-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-config-title">
+        <div class="modal-heading">
+          <div><span class="eyebrow">OPENAI CONNECTION</span><h2 id="ai-config-title">真实AI连接</h2></div>
+          <button id="close-ai-config" class="modal-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-content">
+          <label class="config-field" for="api-base-url"><span>AI后端地址</span><input id="api-base-url" type="url" placeholder="https://你的后端域名" /></label>
+          <p class="config-note">这里只填写你自己的后端地址，不填写OpenAI API Key。密钥必须保存在后端环境变量中。</p>
+          <div id="ai-config-result" class="connection-result">尚未检测连接</div>
+          <div class="modal-actions"><button id="test-ai-connection" class="button secondary" type="button">测试连接</button><button id="save-ai-config" class="button primary" type="button">保存并启用</button></div>
+        </div>
+      </section>
+    </div>
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
     <script src="data.js"></script>
     <script src="core.js"></script>
+    <script src="config.js"></script>
+    <script src="ai-client.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

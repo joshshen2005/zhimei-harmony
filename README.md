@@ -16,6 +16,9 @@
 - 风险事件创建、分派、处理、待核验和关闭状态流转。
 - 相似会话检索、候选案例生成、人工审核和停止推荐。
 - 浏览器本地持久化风险与案例操作。
+- 通过独立 Node.js 后端接入 OpenAI Responses API，使用严格 JSON Schema 返回结构化分析。
+- OpenAI 不可用、超时或未配置时自动保留原有本地规则分析，不阻断客服操作。
+- 真实 AI 结果与确定性业务核验合并；AI 不能降低已由订单、工单和聊天证据确认的风险等级。
 - Node 内置测试覆盖三条核心演示链路及全部会话分析。
 
 ## 启动
@@ -33,10 +36,21 @@
 http://127.0.0.1:4173
 ```
 
+不启动 AI 后端时，页面会正常使用本地规则。如需真实 OpenAI 分析：
+
+```bash
+cd server
+cp .env.example .env
+npm install
+npm start
+```
+
+在 `server/.env` 中配置 `OPENAI_API_KEY`，然后回到页面点击右上角 AI 状态，测试并保存后端地址。不要在网页中填写 API Key。完整配置与 Render 部署方法见 [OpenAI 接入与部署](docs/openai-integration.md)。
+
 ## 测试
 
 ```bash
-/Users/shenqingyang/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test tests/core.test.js
+node --test tests/core.test.js server/tests/validation.test.mjs
 ```
 
 ## 推荐演示顺序
@@ -78,10 +92,11 @@ http://127.0.0.1:4173
 - 全部业务数据都是虚构 MOCK DATA。
 - 图片消息只有路径，没有真实图片文件，因此不进行图片识别。
 - 当前为离线复盘和交互演示，不读取真实库存、物流轨迹或支付流水。
-- 当前情绪概率是关键词规则产生的演示值，不代表已用 GoEmotions 或 EmoTwiCS 训练出的生产模型。
+- 未连接 OpenAI 时，情绪概率是关键词规则产生的演示值；连接后的概率也是模型自评信心，未经校准，不能当作生产统计概率。
 - 模拟发送、任务分派和案例审核只写入浏览器本地存储。
 - 不执行真实退款、赔付、补发或跨部门操作。
 - 不对不良反应进行医疗诊断或治疗建议。
 
 生产化所需条件见 [生产接入清单](docs/production-readiness.md)。
 情绪标签、分组、VAD、置信度和训练数据接口见 [情绪量化模板](docs/emotion-quantification.md)。
+OpenAI 密钥配置、本地启动、线上后端部署和故障排查见 [OpenAI 接入与部署](docs/openai-integration.md)。

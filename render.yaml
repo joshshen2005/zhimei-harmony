@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: zhimei-openai-backend
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-luna
+      - key: ALLOWED_ORIGINS
+        value: https://joshshen2005.github.io
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 20

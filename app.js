@@ -3,6 +3,7 @@
 
   const data = window.ZHIMEI_DATA;
   const core = window.ZhimeiCore;
+  const aiClient = window.ZhimeiAI;
   if (!data || !core) {
     document.body.innerHTML = "<p style='padding:24px'>数据或分析模块加载失败。请通过本地服务器打开。</p>";
     return;
@@ -12,6 +13,7 @@
   const state = {
     summaries: [], filtered: [], selectedId: "S00018", riskFilter: "",
     risks: readStorage("zhimei-risk-events", []), cases: readStorage("zhimei-cases", []),
+    aiCache: new Map(), aiLoading: new Set(), aiErrors: new Map(), aiAttempted: new Set(),
   };
   const el = {
     clock: byId("clock"), sessionCount: byId("session-count"), sessionList: byId("session-list"),
@@ -20,6 +22,8 @@
     reply: byId("reply-input"), draftSource: byId("draft-source"), toast: byId("toast-region"),
     queue: byId("queue-summary"), context: byId("conversation-context"), copilotSession: byId("copilot-session"),
     modal: byId("case-modal"), modalTitle: byId("case-modal-title"), modalContent: byId("case-modal-content"),
+    analysisState: byId("analysis-state"), aiConfigModal: byId("ai-config-modal"),
+    apiBaseUrl: byId("api-base-url"), aiConfigResult: byId("ai-config-result"),
   };
 
   function byId(id) { return document.getElementById(id); }
@@ -30,6 +34,81 @@
   function riskClass(level) { return level === "高" ? "risk-high" : level === "中" ? "risk-medium" : "risk-low"; }
   function shortTime(value) { return String(value || "").slice(5, 16); }
   function list(items, numbered = false) { return `<ol class="list-clean ${numbered ? "number-list" : ""}">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ol>`; }
+  function unique(items) { return [...new Set((items || []).filter(Boolean))]; }
+
+  const RESPONSE_STRATEGY_ZH = {
+    apology: "道歉", empathy: "共情", gratitude: "感谢", cheerfulness: "积极友好",
+    explanation: "解释原因", request_information: "补充询问信息", help_offline: "转其他渠道处理", other: "其他",
+  };
+
+  function analysisFor(item) {
+    if (!item) return null;
+    const base = item.analysis;
+    const result = state.aiCache.get(item.id);
+    if (!result || !result.analysis) return base;
+    const ai = result.analysis;
+    const group = core.EMOTION_GROUPS.find((entry) => entry.key === ai.emotion.strategy_group) || core.EMOTION_GROUPS[8];
+    const labelMeta = new Map(core.GO_EMOTIONS.map((entry) => [entry.key, entry]));
+    const mapLabels = (labels) => (labels || []).map((label) => ({
+      key: label.label,
+      zh: (labelMeta.get(label.label) || {}).zh || label.label,
+      probability: Number(label.confidence) || 0,
+    }));
+    const currentLabels = mapLabels(ai.emotion.current_labels);
+    const trajectory = (ai.emotion.trajectory || []).map((point) => {
+      const labels = mapLabels(point.labels);
+      const pointGroup = core.EMOTION_GROUPS.find((entry) => labels.some((label) => entry.labels.includes(label.key))) || core.EMOTION_GROUPS[8];
+      const source = base.messages.find((message) => Number(message["消息序号"]) === Number(point.seq)) || {};
+      return {
+        seq: point.seq, time: source["发送时间"], text: source["message_text"] || "原始客户发言待定位",
+        labels, vad: point.vad, group: pointGroup.key, groupZh: pointGroup.zh,
+      };
+    });
+    const aiRiskReasons = (ai.risk_signals || []).map((risk) => ({
+      category: risk.category,
+      level: risk.level === "high" ? "高" : risk.level === "medium" ? "中" : "低",
+      title: risk.title,
+      detail: `${risk.detail}${risk.evidence_seq && risk.evidence_seq.length ? `（证据：客户消息第 ${risk.evidence_seq.join("、")} 条）` : ""}`,
+    }));
+    const riskReasons = [...base.risk.reasons];
+    aiRiskReasons.forEach((risk) => { if (!riskReasons.some((item) => item.title === risk.title)) riskReasons.push(risk); });
+    const aiMaxLevel = aiRiskReasons.some((risk) => risk.level === "高") ? "高" : aiRiskReasons.some((risk) => risk.level === "中") ? "中" : "低";
+    const rank = { 低: 1, 中: 2, 高: 3 };
+    const riskLevel = rank[aiMaxLevel] > rank[base.riskLevel] ? aiMaxLevel : base.riskLevel;
+    const confidence = Math.round((Number(ai.emotion.group_confidence) || 0) * 100);
+    const responseStrategies = (ai.response_strategies || []).map((key) => RESPONSE_STRATEGY_ZH[key] || key);
+    return {
+      ...base,
+      request: ai.request_summary || base.request,
+      preferences: ai.service_intents && ai.service_intents.length ? ai.service_intents : base.preferences,
+      concerns: ai.concerns && ai.concerns.length ? ai.concerns : base.concerns,
+      actions: unique([...base.actions, ...(ai.actions || [])]).slice(0, 5),
+      doNotCommit: unique([...base.doNotCommit, ...(ai.do_not_commit || [])]).slice(0, 6),
+      draft: ai.reply_draft || base.draft,
+      riskLevel,
+      risk: {
+        ...base.risk,
+        level: riskLevel,
+        score: Math.max(base.risk.score, aiMaxLevel === "高" ? 75 : aiMaxLevel === "中" ? 45 : 20),
+        reasons: riskReasons,
+      },
+      emotion: {
+        ...base.emotion,
+        group: group.key, groupZh: group.zh, groupEn: group.en,
+        labels: currentLabels.length ? currentLabels : base.emotion.labels,
+        vad: ai.emotion.current_vad || base.emotion.vad,
+        trajectory: trajectory.length ? trajectory : base.emotion.trajectory,
+        trend: ai.emotion.trend,
+        confidence,
+        confidenceLabel: confidence >= 70 ? "较高" : confidence >= 45 ? "中等" : "较低",
+        responseStrategies: responseStrategies.length ? responseStrategies : group.strategy,
+        method: `OpenAI ${result.meta && result.meta.model ? result.meta.model : "模型"} · 信心未校准`,
+      },
+      aiMeta: result.meta,
+      needsHumanReview: Boolean(ai.needs_human_review),
+      reviewReason: ai.review_reason,
+    };
+  }
 
   function initialise() {
     state.summaries = [...index.sessions.entries()].map(([id, messages]) => core.sessionSummary(id, messages, index));
@@ -58,10 +137,99 @@
     });
     byId("close-case-modal").addEventListener("click", closeCaseModal);
     el.modal.addEventListener("click", (event) => { if (event.target === el.modal) closeCaseModal(); });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeCaseModal(); });
+    el.analysisState.addEventListener("click", openAIConfig);
+    byId("close-ai-config").addEventListener("click", closeAIConfig);
+    byId("test-ai-connection").addEventListener("click", testAIConnection);
+    byId("save-ai-config").addEventListener("click", saveAIConfig);
+    el.aiConfigModal.addEventListener("click", (event) => { if (event.target === el.aiConfigModal) closeAIConfig(); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeCaseModal(); closeAIConfig(); } });
   }
 
   function updateClock() { el.clock.textContent = new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "medium", hour12: false }).format(new Date()); }
+
+  function updateAIStatus(item) {
+    const baseUrl = aiClient && aiClient.getBaseUrl();
+    let label = "本地规则";
+    let statusClass = "offline";
+    if (item && state.aiLoading.has(item.id)) { label = "OpenAI分析中"; statusClass = "loading"; }
+    else if (item && state.aiCache.has(item.id)) {
+      const result = state.aiCache.get(item.id);
+      label = `OpenAI · ${(result.meta && result.meta.model) || "已连接"}`;
+      statusClass = "connected";
+    } else if (item && state.aiErrors.has(item.id)) { label = "AI失败 · 规则兜底"; statusClass = "error"; }
+    else if (baseUrl) { label = "OpenAI待分析"; statusClass = "ready"; }
+    el.analysisState.className = `analysis-state ${statusClass}`;
+    el.analysisState.innerHTML = `<span></span><b>${esc(label)}</b>`;
+  }
+
+  async function loadAIAnalysis(item, force = false) {
+    if (!item || !aiClient || !aiClient.getBaseUrl()) return updateAIStatus(item);
+    if (force) {
+      state.aiCache.delete(item.id);
+      state.aiErrors.delete(item.id);
+      state.aiAttempted.delete(item.id);
+    }
+    if (state.aiCache.has(item.id) || state.aiLoading.has(item.id) || state.aiAttempted.has(item.id)) return updateAIStatus(item);
+    state.aiAttempted.add(item.id);
+    state.aiLoading.add(item.id);
+    updateAIStatus(item);
+    try {
+      const result = await aiClient.analyze(item.analysis);
+      state.aiCache.set(item.id, result);
+      state.aiErrors.delete(item.id);
+    } catch (error) {
+      state.aiErrors.set(item.id, error.message || "AI分析失败");
+    } finally {
+      state.aiLoading.delete(item.id);
+      if (selected() && selected().id === item.id) renderWorkspace();
+    }
+  }
+
+  function resetAIState() {
+    state.aiCache.clear();
+    state.aiErrors.clear();
+    state.aiAttempted.clear();
+    state.aiLoading.clear();
+  }
+
+  function openAIConfig() {
+    el.apiBaseUrl.value = aiClient ? aiClient.getBaseUrl() : "";
+    el.aiConfigResult.className = "connection-result";
+    el.aiConfigResult.textContent = "点击“测试连接”检查后端与OpenAI配置。";
+    el.aiConfigModal.hidden = false;
+  }
+  function closeAIConfig() { el.aiConfigModal.hidden = true; }
+
+  async function testAIConnection() {
+    if (!aiClient) return;
+    const baseUrl = el.apiBaseUrl.value.trim();
+    if (!baseUrl) {
+      el.aiConfigResult.className = "connection-result error";
+      el.aiConfigResult.textContent = "请先填写AI后端地址。";
+      return;
+    }
+    el.aiConfigResult.className = "connection-result loading";
+    el.aiConfigResult.textContent = "正在检测后端连接…";
+    try {
+      const result = await aiClient.health(baseUrl);
+      el.aiConfigResult.className = `connection-result ${result.configured ? "success" : "warning"}`;
+      el.aiConfigResult.textContent = result.configured
+        ? `连接成功，当前模型：${result.model}`
+        : "后端可访问，但尚未设置 OPENAI_API_KEY。";
+    } catch (error) {
+      el.aiConfigResult.className = "connection-result error";
+      el.aiConfigResult.textContent = error.message || "无法连接AI后端。";
+    }
+  }
+
+  async function saveAIConfig() {
+    if (!aiClient) return;
+    const baseUrl = aiClient.setBaseUrl(el.apiBaseUrl.value);
+    resetAIState();
+    closeAIConfig();
+    showToast(baseUrl ? "AI后端地址已保存，正在分析当前会话。" : "已关闭真实AI，继续使用本地规则。", false);
+    renderWorkspace();
+  }
 
   function filterSessions() {
     const query = el.search.value.trim().toLowerCase();
@@ -103,13 +271,15 @@
   function renderWorkspace() {
     const item = selected();
     if (!item) return;
-    const a = item.analysis;
+    const a = analysisFor(item);
     el.header.innerHTML = `<div class="conversation-person"><h2>${esc(item.buyer)}</h2><p>${esc(item.id)} · ${esc(a.sceneMajor)} / ${esc(a.sceneMinor)}</p></div><div class="conversation-meta"><strong>${a.messages.length} 条消息</strong><span>${a.tickets.length} 张关联工单 · ${a.order ? "已关联订单" : "无关联订单"}</span></div>`;
     el.copilotSession.textContent = `${item.id} · ${a.sceneMinor}`;
     renderOrder(a.order);
     el.context.innerHTML = `<span class="context-label">本次处理重点</span><span class="context-chip important">${esc(a.riskLevel)}风险 · ${a.risk.score}分</span><span class="context-chip">${a.conflicts.length} 项数据差异</span><span class="context-chip">${a.unanswered.length} 个待回答问题</span><span class="context-chip">${a.commitments.length} 项承诺待核验</span>`;
     renderMessages(a.messages);
     renderDashboard();
+    updateAIStatus(item);
+    void loadAIAnalysis(item);
   }
 
   function renderOrder(order) {
@@ -127,8 +297,9 @@
   }
 
   function renderDashboard() {
-    const a = selected().analysis;
+    const a = analysisFor(selected());
     const emotion = a.emotion;
+    const analysisSource = a.aiMeta ? "OpenAI真实模型" : "本地规则归纳";
     const conflicts = a.conflicts.length ? a.conflicts.map((item) => `<div class="timeline-alert"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p><div class="source-row">${item.sources.map((source) => `<span class="source-tag">${esc(source)}</span>`).join("")}<button class="source-link" data-evidence type="button">定位聊天证据</button></div></div>`).join("") : `<div class="timeline-alert clear"><strong>未发现明确的跨源冲突</strong><p>仍需由客服按实际业务结果完成最终核验。</p></div>`;
     const labels = emotion.labels.map((label) => `<span class="emotion-tag">${esc(label.zh)} <b>${Math.round(label.probability * 100)}%</b></span>`).join("");
     const activeLabels = new Set(emotion.labels.map((item) => item.key));
@@ -142,8 +313,9 @@
 
     el.content.innerHTML = `
       <section id="module-overview" class="dashboard-section overview-section">
-        <div class="decision-hero"><div><span class="hero-kicker">当前核心诉求 · AI 归纳</span><h3>${esc(a.request)}</h3></div><span class="risk-score-pill ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险 ${a.risk.score}</span></div>
+        <div class="decision-hero"><div><span class="hero-kicker">当前核心诉求 · ${esc(analysisSource)}</span><h3>${esc(a.request)}</h3></div><span class="risk-score-pill ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险 ${a.risk.score}</span></div>
         <div class="decision-grid"><article><span>下一步先做</span><strong>${esc(a.actions[0])}</strong></article><article><span>处理意向</span><strong>${esc(a.preferences.join("；") || "客户未明确选择处理方式")}</strong></article><article><span>服务边界</span><strong>${esc(a.doNotCommit[0])}</strong></article></div>
+        ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需要人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
       </section>
 
       <section id="module-emotion" class="dashboard-section">
@@ -218,7 +390,7 @@
   }
 
   function focusEvidence() {
-    const a = selected().analysis;
+    const a = analysisFor(selected());
     const target = [...a.messages].reverse().find((message) => message["角色"] === "买家" && /换|到账|退款|发错|过敏|物流/.test(message["message_text"])) || a.messages.find((message) => message["角色"] === "买家");
     const node = target && byId(`msg-${target["消息序号"]}`);
     if (!node) return;
@@ -234,7 +406,7 @@
     return `<article class="manual-event"><div class="card-title-row"><strong>${esc(event.title)}</strong><span class="status-chip active">${esc(event.status)}</span></div><p>负责人：${esc(event.owner)}<br>下一步：${esc(event.nextAction)}</p><div class="risk-actions">${statuses.map((status) => `<button class="button small ${event.status === status ? "primary" : "secondary"}" data-risk-id="${esc(event.id)}" data-status="${esc(status)}" type="button">${esc(status)}</button>`).join("")}</div></article>`;
   }
   function createRisk() {
-    const a = selected().analysis;
+    const a = analysisFor(selected());
     state.risks.unshift({ id: `RISK-${Date.now()}`, sessionId: state.selectedId, title: a.risk.reasons[0] ? a.risk.reasons[0].title : "服务事项需要跟进", status: "已确认并分派", owner: a.risk.owner, nextAction: a.risk.nextAction, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }) });
     saveStorage("zhimei-risk-events", state.risks);
     showToast("风险事件已创建并分派。", false);
@@ -253,7 +425,7 @@
   function openCaseModal(sessionId) {
     const item = state.summaries.find((entry) => entry.id === sessionId);
     if (!item) return;
-    const a = item.analysis;
+    const a = analysisFor(item);
     el.modalTitle.textContent = `${a.sceneMinor} · ${item.id}`;
     el.modalContent.innerHTML = `<div class="modal-summary"><span>AI 归纳的核心诉求</span><strong>${esc(a.request)}</strong></div><div class="modal-grid"><div><span>可借鉴</span>${list(a.actions)}</div><div class="boundary-box"><span>不可照搬</span>${list(a.doNotCommit)}</div></div><div class="modal-notice">相似案例只提供处理思路。使用前仍需核对当前订单、规则版本、消费者选择和业务执行状态。</div>`;
     el.modal.hidden = false;
@@ -261,7 +433,7 @@
   function closeCaseModal() { el.modal.hidden = true; }
   function caseItemHtml(item) { return `<article class="manual-event"><div class="card-title-row"><strong>${esc(item.title)}</strong><span class="status-chip ${item.status === "已审核" ? "active" : ""}">${esc(item.status)}</span></div><p>可借鉴：${esc(item.lesson)}<br>不可照搬：${esc(item.boundary)}</p><div class="case-actions">${item.status !== "已审核" ? `<button class="button primary small" data-approve-case="${esc(item.id)}" type="button">人工审核通过</button>` : ""}<button class="button secondary small" data-stop-case="${esc(item.id)}" type="button">停止推荐</button></div></article>`; }
   function prepareCase() {
-    const a = selected().analysis;
+    const a = analysisFor(selected());
     state.cases.unshift({ id: `CASE-${Date.now()}`, sessionId: state.selectedId, title: `${a.sceneMinor}处理案例`, status: "待审核", lesson: a.actions.join("；"), boundary: a.doNotCommit.join("；"), createdAt: new Date().toISOString() });
     saveStorage("zhimei-cases", state.cases);
     showToast("候选案例已生成，审核前不会进入正式推荐库。", false);
