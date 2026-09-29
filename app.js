@@ -165,6 +165,7 @@
     else if (baseUrl) { label = "AI待分析"; statusClass = "ready"; }
     el.analysisState.className = `analysis-state ${statusClass}`;
     el.analysisState.innerHTML = `<span></span><b>${esc(label)}</b>`;
+    el.analysisState.title = item && state.aiErrors.has(item.id) ? state.aiErrors.get(item.id) : "点击配置或检查AI连接";
   }
 
   async function loadAIAnalysis(item, force = false) {
@@ -199,8 +200,10 @@
 
   function openAIConfig() {
     el.apiBaseUrl.value = aiClient ? aiClient.getBaseUrl() : "";
-    el.aiConfigResult.className = "connection-result";
-    el.aiConfigResult.textContent = "点击“测试连接”检查后端与模型服务配置。";
+    const item = selected();
+    const currentError = item && state.aiErrors.get(item.id);
+    el.aiConfigResult.className = `connection-result${currentError ? " error" : ""}`;
+    el.aiConfigResult.textContent = currentError || "点击“测试连接”检查后端与模型服务配置。";
     el.aiConfigModal.hidden = false;
   }
   function closeAIConfig() { el.aiConfigModal.hidden = true; }
