@@ -5,6 +5,8 @@
     defaultApiBaseUrl: local
       ? "http://127.0.0.1:8787"
       : "https://zhimei-ai-backend.onrender.com",
-    requestTimeoutMs: 35000,
+    // Render Free can need about a minute to wake after idling; allow the
+    // service to wake and still leave time for the DeepSeek request itself.
+    requestTimeoutMs: 100000,
   });
 })(window);
