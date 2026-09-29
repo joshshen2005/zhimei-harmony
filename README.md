@@ -4,6 +4,8 @@
 
 在线演示：[Zhimei Harmony](https://joshshen2005.github.io/zhimei-harmony/)
 
+公网 AI 后端：[zhimei-ai-backend.onrender.com](https://zhimei-ai-backend.onrender.com/api/health)
+
 ## 已实现
 
 - 导入998条聊天消息、113笔订单及五类共80张工单。
@@ -18,6 +20,7 @@
 - 浏览器本地持久化风险与案例操作。
 - 通过独立 Node.js 后端默认接入 DeepSeek Responses API，保留 OpenAI 切换能力，使用 JSON Schema 返回结构化分析。
 - 模型服务不可用、超时或未配置时自动保留原有本地规则分析，不阻断客服操作。
+- GitHub Pages 在线版本自动连接 Render 上的 DeepSeek 后端；密钥仅保存在 Render 加密环境变量中，不进入浏览器或 Git 仓库。
 - 真实 AI 结果与确定性业务核验合并；AI 不能降低已由订单、工单和聊天证据确认的风险等级。
 - Node 内置测试覆盖三条核心演示链路及全部会话分析。
 
