@@ -22,7 +22,7 @@
         </div>
         <div class="topbar-status">
           <span class="environment-badge">MOCK DATA</span>
-          <span class="mode-badge">规则兜底 + OpenAI</span>
+          <span class="mode-badge">规则兜底 + DeepSeek</span>
           <span id="clock" class="clock"></span>
         </div>
       </header>
@@ -103,12 +103,12 @@
     <div id="ai-config-modal" class="modal-overlay" hidden>
       <section class="case-modal ai-config-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-config-title">
         <div class="modal-heading">
-          <div><span class="eyebrow">OPENAI CONNECTION</span><h2 id="ai-config-title">真实AI连接</h2></div>
+          <div><span class="eyebrow">MODEL CONNECTION</span><h2 id="ai-config-title">真实AI连接</h2></div>
           <button id="close-ai-config" class="modal-close" type="button" aria-label="关闭">×</button>
         </div>
         <div class="modal-content">
           <label class="config-field" for="api-base-url"><span>AI后端地址</span><input id="api-base-url" type="url" placeholder="https://你的后端域名" /></label>
-          <p class="config-note">这里只填写你自己的后端地址，不填写OpenAI API Key。密钥必须保存在后端环境变量中。</p>
+          <p class="config-note">这里只填写你自己的后端地址，不填写 DeepSeek 或 OpenAI API Key。密钥必须保存在后端环境变量中。</p>
           <div id="ai-config-result" class="connection-result">尚未检测连接</div>
           <div class="modal-actions"><button id="test-ai-connection" class="button secondary" type="button">测试连接</button><button id="save-ai-config" class="button primary" type="button">保存并启用</button></div>
         </div>

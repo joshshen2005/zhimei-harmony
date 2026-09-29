@@ -35,6 +35,11 @@
   function shortTime(value) { return String(value || "").slice(5, 16); }
   function list(items, numbered = false) { return `<ol class="list-clean ${numbered ? "number-list" : ""}">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ol>`; }
   function unique(items) { return [...new Set((items || []).filter(Boolean))]; }
+  function providerLabel(meta) {
+    if (!meta) return "AI";
+    if (meta.providerLabel) return meta.providerLabel;
+    return meta.provider === "deepseek" ? "DeepSeek" : meta.provider === "openai" ? "OpenAI" : "AI";
+  }
 
   const RESPONSE_STRATEGY_ZH = {
     apology: "道歉", empathy: "共情", gratitude: "感谢", cheerfulness: "积极友好",
@@ -102,7 +107,7 @@
         confidence,
         confidenceLabel: confidence >= 70 ? "较高" : confidence >= 45 ? "中等" : "较低",
         responseStrategies: responseStrategies.length ? responseStrategies : group.strategy,
-        method: `OpenAI ${result.meta && result.meta.model ? result.meta.model : "模型"} · 信心未校准`,
+        method: `${providerLabel(result.meta)} ${result.meta && result.meta.model ? result.meta.model : "模型"} · 信心未校准`,
       },
       aiMeta: result.meta,
       needsHumanReview: Boolean(ai.needs_human_review),
@@ -151,13 +156,13 @@
     const baseUrl = aiClient && aiClient.getBaseUrl();
     let label = "本地规则";
     let statusClass = "offline";
-    if (item && state.aiLoading.has(item.id)) { label = "OpenAI分析中"; statusClass = "loading"; }
+    if (item && state.aiLoading.has(item.id)) { label = "AI分析中"; statusClass = "loading"; }
     else if (item && state.aiCache.has(item.id)) {
       const result = state.aiCache.get(item.id);
-      label = `OpenAI · ${(result.meta && result.meta.model) || "已连接"}`;
+      label = `${providerLabel(result.meta)} · ${(result.meta && result.meta.model) || "已连接"}`;
       statusClass = "connected";
     } else if (item && state.aiErrors.has(item.id)) { label = "AI失败 · 规则兜底"; statusClass = "error"; }
-    else if (baseUrl) { label = "OpenAI待分析"; statusClass = "ready"; }
+    else if (baseUrl) { label = "AI待分析"; statusClass = "ready"; }
     el.analysisState.className = `analysis-state ${statusClass}`;
     el.analysisState.innerHTML = `<span></span><b>${esc(label)}</b>`;
   }
@@ -195,7 +200,7 @@
   function openAIConfig() {
     el.apiBaseUrl.value = aiClient ? aiClient.getBaseUrl() : "";
     el.aiConfigResult.className = "connection-result";
-    el.aiConfigResult.textContent = "点击“测试连接”检查后端与OpenAI配置。";
+    el.aiConfigResult.textContent = "点击“测试连接”检查后端与模型服务配置。";
     el.aiConfigModal.hidden = false;
   }
   function closeAIConfig() { el.aiConfigModal.hidden = true; }
@@ -214,8 +219,8 @@
       const result = await aiClient.health(baseUrl);
       el.aiConfigResult.className = `connection-result ${result.configured ? "success" : "warning"}`;
       el.aiConfigResult.textContent = result.configured
-        ? `连接成功，当前模型：${result.model}`
-        : "后端可访问，但尚未设置 OPENAI_API_KEY。";
+        ? `连接成功，服务商：${result.providerLabel || result.provider || "AI"}；模型：${result.model}`
+        : `后端可访问，但尚未设置 ${result.requiredKey || "API_KEY"}。`;
     } catch (error) {
       el.aiConfigResult.className = "connection-result error";
       el.aiConfigResult.textContent = error.message || "无法连接AI后端。";
@@ -299,7 +304,7 @@
   function renderDashboard() {
     const a = analysisFor(selected());
     const emotion = a.emotion;
-    const analysisSource = a.aiMeta ? "OpenAI真实模型" : "本地规则归纳";
+    const analysisSource = a.aiMeta ? `${providerLabel(a.aiMeta)}真实模型` : "本地规则归纳";
     const conflicts = a.conflicts.length ? a.conflicts.map((item) => `<div class="timeline-alert"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p><div class="source-row">${item.sources.map((source) => `<span class="source-tag">${esc(source)}</span>`).join("")}<button class="source-link" data-evidence type="button">定位聊天证据</button></div></div>`).join("") : `<div class="timeline-alert clear"><strong>未发现明确的跨源冲突</strong><p>仍需由客服按实际业务结果完成最终核验。</p></div>`;
     const labels = emotion.labels.map((label) => `<span class="emotion-tag">${esc(label.zh)} <b>${Math.round(label.probability * 100)}%</b></span>`).join("");
     const activeLabels = new Set(emotion.labels.map((item) => item.key));
