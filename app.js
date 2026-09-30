@@ -14,6 +14,8 @@
     summaries: [], filtered: [], selectedId: "S00018", riskFilter: "",
     risks: readStorage("zhimei-risk-events", []), cases: readStorage("zhimei-cases", []),
     aiCache: new Map(), aiLoading: new Set(), aiErrors: new Map(), aiAttempted: new Set(),
+    copilotView: { insight: "emotion", bottom: "workbench" },
+    copilotChats: new Map(), replyPreviews: new Map(),
   };
   const el = {
     clock: byId("clock"), sessionCount: byId("session-count"), sessionList: byId("session-list"),
@@ -318,53 +320,125 @@
     const similar = state.summaries.filter((item) => item.id !== a.sessionId && (item.sceneMinor === a.sceneMinor || item.sceneMajor === a.sceneMajor)).slice(0, 3);
     const similarHtml = similar.length ? similar.map((item) => `<article class="experience-row"><div><strong>${esc(item.sceneMinor)} · ${esc(item.id)}</strong><p>${item.sceneMinor === a.sceneMinor ? "高" : "中"}适用度 · 复用前需核对当前规则和执行阶段</p></div><button class="button secondary small" data-preview-session="${esc(item.id)}" type="button">查看 AI 摘要</button></article>`).join("") : `<div class="empty-state compact">暂无可参考的同类会话。</div>`;
     const caseHtml = state.cases.filter((item) => item.sessionId === state.selectedId || item.status === "已审核").map(caseItemHtml).join("") || `<p class="inline-empty">暂无人工沉淀案例。</p>`;
+    const appealQuotes = customerAppealQuotes(a);
+    const intensity = Number(emotion.vad.arousal) >= 4 ? "高" : Number(emotion.vad.arousal) >= 3 ? "中" : "低";
+    const trendIcon = /升|加剧|恶化|上/.test(emotion.trend) ? "↗" : /降|缓和|改善|下/.test(emotion.trend) ? "↘" : "→";
+    const eventTags = unique([a.sceneMinor, ...(a.conflicts.length ? [`${a.conflicts.length}项数据差异`] : []), ...(a.unanswered.length ? [`${a.unanswered.length}个问题待答`] : []), ...(a.commitments.length ? ["承诺待核验"] : [])]).slice(0, 4);
+    const chats = ensureCopilotChat(a);
+    const preview = state.replyPreviews.get(state.selectedId) || a.draft;
 
     el.content.innerHTML = `
-      <section id="module-overview" class="dashboard-section overview-section">
-        <div class="decision-hero"><div><span class="hero-kicker">当前核心诉求 · ${esc(analysisSource)}</span><h3>${esc(a.request)}</h3></div><span class="risk-score-pill ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险 ${a.risk.score}</span></div>
-        <div class="decision-grid"><article><span>下一步先做</span><strong>${esc(a.actions[0])}</strong></article><article><span>处理意向</span><strong>${esc(a.preferences.join("；") || "客户未明确选择处理方式")}</strong></article><article><span>服务边界</span><strong>${esc(a.doNotCommit[0])}</strong></article></div>
-        ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需要人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
-      </section>
+      <div class="copilot-board">
+        <section id="module-overview" class="copilot-zone overview-zone" aria-label="当前判断概览">
+          <div class="zone-tabs" role="tablist" aria-label="情绪与风险">
+            <button class="zone-tab ${state.copilotView.insight === "emotion" ? "active" : ""}" data-insight-tab="emotion" role="tab" aria-selected="${state.copilotView.insight === "emotion"}" type="button">情绪</button>
+            <button class="zone-tab ${state.copilotView.insight === "risk" ? "active" : ""}" data-insight-tab="risk" role="tab" aria-selected="${state.copilotView.insight === "risk"}" type="button">风险 <span class="mini-risk ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}</span></button>
+          </div>
 
-      <section id="module-emotion" class="dashboard-section">
-        <header class="module-heading"><div><span class="module-index">01</span><h3>情绪与沟通策略</h3></div><span class="method-badge">${esc(emotion.method)}</span></header>
-        <div class="emotion-overview"><div><span class="small-label">当前策略组</span><strong class="emotion-name">${esc(emotion.groupZh)}</strong><span class="emotion-en">${esc(emotion.groupEn)}</span></div><div class="emotion-stat"><b>${emotion.confidence}%</b><span>组别置信度 · ${esc(emotion.confidenceLabel)}</span></div></div>
-        <div class="emotion-tags">${labels}</div>
-        <div class="vad-grid">${vadMeter("V", "愉悦度", emotion.vad.valence, "越低越负面")} ${vadMeter("A", "唤醒度", emotion.vad.arousal, "越高越激动")} ${vadMeter("D", "掌控感", emotion.vad.dominance, "越高越有控制感")}</div>
-        <div class="emotion-facts"><div><span>情绪变化</span><b>${esc(emotion.trend)}</b></div><div><span>建议策略</span><b>${esc(emotion.responseStrategies.join("、"))}</b></div><div><span>客户希望我们怎么解决</span><b>${esc(a.preferences.join("；") || "尚未表达明确处理方式")}</b></div></div>
-        <details class="sub-details"><summary>查看每轮客户情绪变化</summary><div class="emotion-trajectory">${emotion.trajectory.map(trajectoryPoint).join("")}</div></details>
-        <details class="sub-details"><summary>查看 GoEmotions 28 种完整标签</summary><p class="detail-note">细标签可多选；高亮项为本会话近期识别结果。客服界面不要求 28 项始终展开。</p><div class="taxonomy-grid">${taxonomy}</div></details>
-      </section>
+          <div id="module-emotion" class="insight-panel" data-insight-panel="emotion" ${state.copilotView.insight === "emotion" ? "" : "hidden"}>
+            <div class="insight-compact" tabindex="0">
+              <div><span class="insight-label">当前策略组</span><strong>${esc(emotion.groupZh)}</strong><small>${esc(emotion.groupEn)}</small></div>
+              <div class="insight-metrics"><span><b>${intensity}</b>强度</span><span><b>${trendIcon}</b>${esc(emotion.trend)}</span><span><b>${emotion.confidence}%</b>置信度</span></div>
+              <div class="insight-hover-tip">悬停或展开查看判断依据</div>
+            </div>
+            <details class="compact-details"><summary>情绪依据与沟通策略</summary><div class="insight-detail-scroll">
+              <div class="emotion-tags">${labels}</div>
+              <div class="vad-grid">${vadMeter("V", "愉悦度", emotion.vad.valence, "正负面")} ${vadMeter("A", "唤醒度", emotion.vad.arousal, "激动程度")} ${vadMeter("D", "掌控感", emotion.vad.dominance, "控制感")}</div>
+              <div class="emotion-facts"><div><span>建议策略</span><b>${esc(emotion.responseStrategies.join("、"))}</b></div><div><span>明确偏好</span><b>${esc(a.preferences.join("；") || "客户尚未明确选择处理方式")}</b></div><div><span>判断来源</span><b>${esc(emotion.method)}</b></div></div>
+              <details class="sub-details"><summary>每轮客户情绪变化</summary><div class="emotion-trajectory">${emotion.trajectory.map(trajectoryPoint).join("")}</div></details>
+              <details class="sub-details"><summary>GoEmotions 28 种完整标签</summary><p class="detail-note">细标签允许多选；高亮项是本会话当前识别结果。</p><div class="taxonomy-grid">${taxonomy}</div></details>
+            </div></details>
+          </div>
 
-      <section id="module-verify" class="dashboard-section">
-        <header class="module-heading"><div><span class="module-index">02</span><h3>业务事实核验</h3></div><span>${a.conflicts.length} 项差异</span></header>
-        <div class="business-timeline">${buildTimeline(a).map(timelineItem).join("")}</div>
-        <div class="timeline-alerts">${conflicts}</div>
-      </section>
+          <div id="module-risk" class="insight-panel" data-insight-panel="risk" ${state.copilotView.insight === "risk" ? "" : "hidden"}>
+            <div class="risk-compact" tabindex="0">
+              <div class="risk-ring small" style="--risk-score:${a.risk.score * 3.6}deg"><b>${a.risk.score}</b><span>风险分</span></div>
+              <div class="risk-summary-copy"><span class="risk-tag ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险</span><strong>${esc(a.risk.nextAction)}</strong><small>${esc(a.risk.owner)} · ${esc(a.risk.responseSla)}</small></div>
+            </div>
+            <details class="compact-details"><summary>异常依据与跟进闭环</summary><div class="insight-detail-scroll">
+              <div class="risk-reason-grid">${risks}</div>
+              <details class="sub-details" ${manualRisks.length ? "open" : ""}><summary>人工跟进事件（${manualRisks.length}）</summary><div>${manualRiskHtml}</div></details>
+              <button id="create-risk" class="button primary full-button" type="button">人工确认并创建风险事件</button>
+            </div></details>
+          </div>
 
-      <section id="module-risk" class="dashboard-section">
-        <header class="module-heading"><div><span class="module-index">03</span><h3>风险面板</h3></div><span>识别 → 分派 → 跟进 → 关闭</span></header>
-        <div class="risk-overview"><div class="risk-ring" style="--risk-score:${a.risk.score * 3.6}deg"><b>${a.risk.score}</b><span>风险分</span></div><div class="risk-meta"><p><span>风险等级</span><b class="${riskClass(a.riskLevel)} text-risk">${esc(a.riskLevel)}</b></p><p><span>建议负责人</span><b>${esc(a.risk.owner)}</b></p><p><span>响应要求</span><b>${esc(a.risk.responseSla)}</b></p><p><span>立即动作</span><b>${esc(a.risk.nextAction)}</b></p></div></div>
-        <div class="risk-reason-grid">${risks}</div>
-        <details class="sub-details" ${manualRisks.length ? "open" : ""}><summary>人工跟进事件（${manualRisks.length}）</summary><div>${manualRiskHtml}</div></details>
-        <button id="create-risk" class="button primary full-button" type="button">人工确认并创建风险事件</button>
-      </section>
+          <div class="appeal-brief">
+            <div class="event-tag-row">${eventTags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>
+            <div class="appeal-row"><span>核心诉求</span><blockquote>“${esc(appealQuotes.primary)}”</blockquote></div>
+            <div class="appeal-row secondary"><span>次要诉求</span><p>${esc(appealQuotes.secondary)}</p></div>
+            <div class="appeal-row action"><span>建议解决方式</span><p>${esc(a.actions[0] || "先核验事实，再向客户说明可执行方案")}</p></div>
+          </div>
+          ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
+        </section>
 
-      <section id="module-reply" class="dashboard-section">
-        <header class="module-heading"><div><span class="module-index">04</span><h3>处理方案与回复</h3></div><span>AI 起草，人工发送</span></header>
-        <div class="solution-columns"><div><span class="small-label">建议行动</span>${list(a.actions, true)}</div><div class="boundary-box"><span class="small-label">暂时不能承诺</span>${list(a.doNotCommit)}</div></div>
-        ${a.unanswered.length ? `<div class="unanswered-box"><strong>尚未直接回答</strong>${list(a.unanswered)}</div>` : ""}
-        <div class="draft-card"><label for="ai-draft">通俗版回复草稿</label><textarea id="ai-draft">${esc(a.draft)}</textarea><div class="draft-actions"><span>请核对事实、语气与承诺后再发送</span><button id="insert-draft" class="button primary" type="button">插入人工回复框</button></div></div>
-      </section>
+        <section id="module-verify" class="copilot-zone timeline-zone" aria-label="业务核验时间线">
+          <header class="zone-heading"><div><span class="zone-index">02</span><div><h3>业务核验时间线</h3><p>只保留会改变状态、责任或判断的节点</p></div></div><span class="difference-count">${a.conflicts.length} 项差异</span></header>
+          <div class="timeline-scroll"><div class="business-timeline">${buildTimeline(a).map(timelineItem).join("")}</div></div>
+          <details class="timeline-differences"><summary>查看数据差异与证据</summary><div class="timeline-alerts">${conflicts}</div></details>
+        </section>
 
-      <section id="module-experience" class="dashboard-section">
-        <header class="module-heading"><div><span class="module-index">05</span><h3>经验参考</h3></div><span>摘要弹窗，不离开当前会话</span></header>
-        <div class="experience-list">${similarHtml}</div>
-        <details class="sub-details"><summary>案例沉淀与审核</summary><div>${caseHtml}</div></details>
-        <button id="prepare-case" class="button secondary full-button" type="button">将当前处理生成候选案例</button>
-      </section>`;
+        <section class="copilot-zone workbench-zone" aria-label="回复与经验工作台">
+          <div class="zone-tabs bottom-tabs" role="tablist" aria-label="回复工作台页面">
+            <button class="zone-tab ${state.copilotView.bottom === "workbench" ? "active" : ""}" data-bottom-tab="workbench" role="tab" aria-selected="${state.copilotView.bottom === "workbench"}" type="button">回复与 AI 对话</button>
+            <button class="zone-tab ${state.copilotView.bottom === "experience" ? "active" : ""}" data-bottom-tab="experience" role="tab" aria-selected="${state.copilotView.bottom === "experience"}" type="button">模拟与经验</button>
+          </div>
+
+          <div id="module-reply" class="workbench-page" data-bottom-panel="workbench" ${state.copilotView.bottom === "workbench" ? "" : "hidden"}>
+            <article class="reply-pane">
+              <header><div><strong>建议回复</strong><span>可直接编辑</span></div><span class="source-tag">${esc(analysisSource)}</span></header>
+              <textarea id="ai-draft" aria-label="AI 建议回复">${esc(a.draft)}</textarea>
+              <details class="reply-guidance"><summary>行动与承诺边界</summary><div><span>建议行动</span>${list(a.actions, true)}<span>暂不能承诺</span>${list(a.doNotCommit)}</div></details>
+              <div class="pane-actions"><button id="preview-draft" class="button secondary small" type="button">预览效果</button><button id="insert-draft" class="button primary small" type="button">插入人工回复</button></div>
+            </article>
+            <article class="chat-pane">
+              <header><div><strong>AI 对话</strong><span>围绕当前会话追问</span></div><span class="online-dot" title="基于当前分析"></span></header>
+              <div id="copilot-chat-log" class="chat-log">${chats.map((message) => `<div class="chat-message ${message.role}"><span>${message.role === "assistant" ? "AI" : "我"}</span><p>${esc(message.text)}</p></div>`).join("")}</div>
+              <div class="chat-suggestions"><button data-chat-prompt="风险点是什么？" type="button">风险点</button><button data-chat-prompt="我该先做什么？" type="button">下一步</button></div>
+              <form id="copilot-chat-form" class="chat-form"><input id="copilot-chat-input" aria-label="向 AI 追问" placeholder="追问当前会话…" autocomplete="off"><button type="submit" aria-label="发送">↑</button></form>
+            </article>
+          </div>
+
+          <div id="module-experience" class="workbench-page experience-page" data-bottom-panel="experience" ${state.copilotView.bottom === "experience" ? "" : "hidden"}>
+            <article class="simulation-pane">
+              <header><strong>回复模拟结果</strong><span>发送前预览</span></header>
+              <div class="simulated-bubble">${esc(preview)}</div>
+              <div class="simulation-checks"><span>✓ 通俗表达</span><span>✓ 保留人工确认</span><span>${a.riskLevel === "高" ? "! 高风险需复核" : "✓ 风险可控"}</span></div>
+            </article>
+            <article class="experience-pane">
+              <header><strong>经验参考</strong><span>点击后弹窗查看 AI 摘要</span></header>
+              <div class="experience-list">${similarHtml}</div>
+              <details class="sub-details"><summary>案例沉淀与审核</summary><div>${caseHtml}</div></details>
+              <button id="prepare-case" class="button secondary full-button" type="button">生成候选案例</button>
+            </article>
+          </div>
+        </section>
+      </div>`;
 
     bindDashboardEvents();
+  }
+
+  function customerAppealQuotes(a) {
+    const buyerTexts = a.messages.filter((item) => item["角色"] === "买家").map((item) => String(item["message_text"] || "").trim()).filter(Boolean);
+    const meaningful = buyerTexts.filter((text) => text.length >= 5 && !/^(好|好的|谢谢|嗯|行|可以)[。！!？?]*$/.test(text));
+    const primary = [...meaningful].reverse().find((text) => /退|换|到账|过敏|物流|发错|补发|积分|怎么|为什么|何时|多久/.test(text)) || meaningful[0] || buyerTexts[0] || a.request;
+    const secondary = meaningful.find((text) => text !== primary) || a.preferences[0] || a.unanswered[0] || "未发现第二项明确诉求";
+    return { primary, secondary };
+  }
+
+  function ensureCopilotChat(a) {
+    if (!state.copilotChats.has(state.selectedId)) {
+      state.copilotChats.set(state.selectedId, [{ role: "assistant", text: `我已读完当前会话。第一步建议：${a.actions[0] || "核验业务事实"}。需要我解释情绪、风险或回复理由都可以。` }]);
+    }
+    return state.copilotChats.get(state.selectedId);
+  }
+
+  function buildCopilotChatReply(a, prompt) {
+    if (/风险|升级|危险/.test(prompt)) return `当前为${a.riskLevel}风险（${a.risk.score}分）。主要依据是${a.risk.reasons.slice(0, 2).map((item) => item.title).join("、") || "暂无明确触发项"}。建议由${a.risk.owner}按“${a.risk.nextAction}”推进。`;
+    if (/情绪|态度|生气|心情/.test(prompt)) return `客户当前更接近“${a.emotion.groupZh}”，强度${Number(a.emotion.vad.arousal) >= 4 ? "高" : Number(a.emotion.vad.arousal) >= 3 ? "中" : "低"}，建议采用${a.emotion.responseStrategies.join("、")}。`;
+    if (/回复|怎么说|话术/.test(prompt)) return `可以先明确回应客户的问题，再说明正在核验，最后给出下一步。现有草稿是：“${a.draft}” 请在发送前核对事实和承诺。`;
+    if (/事实|核验|冲突|差异/.test(prompt)) return a.conflicts.length ? `目前有${a.conflicts.length}项数据差异：${a.conflicts.map((item) => item.title).join("、")}。可在时间线下方定位聊天证据。` : "当前没有发现明确的跨源冲突，但仍需按实际业务结果做最终确认。";
+    if (/下一步|先做|处理/.test(prompt)) return `建议按顺序处理：${a.actions.slice(0, 3).join("；")}。暂时不要承诺：${a.doNotCommit[0] || "未经核验的时效或结果"}。`;
+    return `结合当前会话，核心是先处理“${a.request}”。我建议先${a.actions[0] || "核验事实"}，并避免承诺${a.doNotCommit[0] || "未经确认的处理结果"}。`;
   }
 
   function vadMeter(letter, label, value, note) { return `<div class="vad-item"><div><b>${letter}</b><span>${esc(label)}</span><strong>${value}/5</strong></div><div class="vad-track"><span style="width:${value * 20}%"></span></div><small>${esc(note)}</small></div>`; }
@@ -387,12 +461,46 @@
   function timelineItem(item) { return `<article class="timeline-item ${item.state}"><div class="timeline-marker"></div><div><div class="timeline-top"><span>${esc(shortTime(item.time))}</span><b>${esc(item.source)}</b></div><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p></div></article>`; }
 
   function bindDashboardEvents() {
+    const switchPanels = (buttonSelector, panelSelector, activeValue, stateKey) => {
+      state.copilotView[stateKey] = activeValue;
+      el.content.querySelectorAll(buttonSelector).forEach((button) => {
+        const selected = button.dataset[`${stateKey}Tab`] === activeValue;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-selected", String(selected));
+      });
+      el.content.querySelectorAll(panelSelector).forEach((panel) => { panel.hidden = panel.dataset[`${stateKey}Panel`] !== activeValue; });
+    };
+    el.content.querySelectorAll("[data-insight-tab]").forEach((button) => button.addEventListener("click", () => switchPanels("[data-insight-tab]", "[data-insight-panel]", button.dataset.insightTab, "insight")));
+    el.content.querySelectorAll("[data-bottom-tab]").forEach((button) => button.addEventListener("click", () => switchPanels("[data-bottom-tab]", "[data-bottom-panel]", button.dataset.bottomTab, "bottom")));
     el.content.querySelectorAll("[data-evidence]").forEach((button) => button.addEventListener("click", focusEvidence));
     el.content.querySelectorAll("[data-preview-session]").forEach((button) => button.addEventListener("click", () => openCaseModal(button.dataset.previewSession)));
     el.content.querySelectorAll("[data-risk-id][data-status]").forEach((button) => button.addEventListener("click", () => updateRisk(button.dataset.riskId, button.dataset.status)));
     el.content.querySelectorAll("[data-approve-case]").forEach((button) => button.addEventListener("click", () => updateCase(button.dataset.approveCase, "已审核")));
     el.content.querySelectorAll("[data-stop-case]").forEach((button) => button.addEventListener("click", () => updateCase(button.dataset.stopCase, "停止推荐")));
     byId("insert-draft").addEventListener("click", () => { el.reply.value = byId("ai-draft").value; el.draftSource.textContent = "AI 草稿，等待人工审核"; showToast("草稿已插入，请审核后再发送。", false); });
+    byId("preview-draft").addEventListener("click", () => {
+      const draft = byId("ai-draft").value.trim();
+      if (!draft) return showToast("请先填写回复内容。", true);
+      state.replyPreviews.set(state.selectedId, draft);
+      const bubble = el.content.querySelector(".simulated-bubble");
+      if (bubble) bubble.textContent = draft;
+      switchPanels("[data-bottom-tab]", "[data-bottom-panel]", "experience", "bottom");
+    });
+    const chatForm = byId("copilot-chat-form");
+    const chatInput = byId("copilot-chat-input");
+    const submitChat = (prompt) => {
+      const value = String(prompt || chatInput.value).trim();
+      if (!value) return;
+      const a = analysisFor(selected());
+      const messages = ensureCopilotChat(a);
+      messages.push({ role: "user", text: value }, { role: "assistant", text: buildCopilotChatReply(a, value) });
+      chatInput.value = "";
+      const log = byId("copilot-chat-log");
+      log.insertAdjacentHTML("beforeend", `<div class="chat-message user"><span>我</span><p>${esc(value)}</p></div><div class="chat-message assistant"><span>AI</span><p>${esc(messages[messages.length - 1].text)}</p></div>`);
+      log.scrollTop = log.scrollHeight;
+    };
+    chatForm.addEventListener("submit", (event) => { event.preventDefault(); submitChat(); });
+    el.content.querySelectorAll("[data-chat-prompt]").forEach((button) => button.addEventListener("click", () => submitChat(button.dataset.chatPrompt)));
     byId("create-risk").addEventListener("click", createRisk);
     byId("prepare-case").addEventListener("click", prepareCase);
   }
