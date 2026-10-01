@@ -366,6 +366,12 @@
                 <button class="zone-tab ${state.copilotView.insight === "emotion" ? "active" : ""}" data-insight-tab="emotion" role="tab" aria-selected="${state.copilotView.insight === "emotion"}" type="button">情绪洞察</button>
                 <button class="zone-tab ${state.copilotView.insight === "risk" ? "active" : ""}" data-insight-tab="risk" role="tab" aria-selected="${state.copilotView.insight === "risk"}" type="button">风险 <span class="mini-risk ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}</span></button>
               </div>
+              <div class="appeal-brief" aria-label="诉求与解决建议">
+                <div class="event-tag-row">${eventTags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>
+                <div class="appeal-row primary"><span><b>01</b>核心诉求</span><blockquote>“${esc(appealQuotes.primary)}”</blockquote></div>
+                <div class="appeal-row secondary"><span><b>02</b>次要诉求</span><p>${esc(appealQuotes.secondary)}</p></div>
+                <div class="appeal-row action"><span><b>03</b>建议解决方式</span><p>${esc(a.actions[0] || "先核验事实，再向客户说明可执行方案")}</p></div>
+              </div>
               <div id="module-emotion" class="insight-panel" data-insight-panel="emotion" ${state.copilotView.insight === "emotion" ? "" : "hidden"}>
                 <div class="insight-compact" tabindex="0">
                   <div><span class="insight-label">当前策略组</span><strong>${esc(emotion.groupZh)}</strong><small>${esc(emotion.groupEn)}</small></div>
@@ -389,12 +395,6 @@
                   <details class="sub-details" ${manualRisks.length ? "open" : ""}><summary>人工跟进事件（${manualRisks.length}）</summary><div>${manualRiskHtml}</div></details>
                   <button id="create-risk" class="button primary full-button" type="button">人工确认并创建风险事件</button>
                 </div></details>
-              </div>
-              <div class="appeal-brief">
-                <div class="event-tag-row">${eventTags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>
-                <div class="appeal-row"><span>核心诉求</span><blockquote>“${esc(appealQuotes.primary)}”</blockquote></div>
-                <div class="appeal-row secondary"><span>次要诉求</span><p>${esc(appealQuotes.secondary)}</p></div>
-                <div class="appeal-row action"><span>建议解决方式</span><p>${esc(a.actions[0] || "先核验事实，再向客户说明可执行方案")}</p></div>
               </div>
               ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
             </section>
