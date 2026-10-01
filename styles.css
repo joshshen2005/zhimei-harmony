@@ -1066,3 +1066,234 @@ button { cursor: pointer; }
   .experience-hero { padding-top: 11px; padding-bottom: 11px; }
   .experience-hero p { display: none; }
 }
+
+/* 精致化方案：更高可读性、圆角层次与微信式对话布局 */
+.copilot-panel {
+  background: #eeece9;
+  border-left-color: #d7d2ce;
+  box-shadow: -8px 0 28px rgba(37, 30, 33, .06);
+}
+.copilot-heading {
+  min-height: 50px;
+  height: 50px;
+  padding: 7px 12px;
+  background: linear-gradient(135deg, #fff 0%, #fbf7f8 100%);
+  box-shadow: 0 1px 0 rgba(44, 34, 38, .06);
+}
+.copilot-mark { width: 30px; height: 30px; border-radius: 10px; box-shadow: 0 5px 12px rgba(33, 28, 31, .18); }
+.copilot-heading h2 { font-size: 15px; }
+.copilot-heading p,
+.copilot-heading .analysis-state b { font-size: 10px; }
+.copilot-heading .analysis-state { border: 1px solid rgba(21, 115, 71, .1); border-radius: 12px; }
+
+.copilot-content { padding: 8px; background: linear-gradient(180deg, #f2efed 0%, #ebe8e5 100%); }
+.copilot-board {
+  grid-template-rows: minmax(0, 1fr) minmax(270px, 44%);
+  gap: 8px;
+  background: transparent;
+}
+.screen-deck,
+.chat-dock {
+  overflow: hidden;
+  border: 1px solid rgba(216, 210, 206, .92);
+  border-radius: 17px;
+  box-shadow: 0 8px 24px rgba(46, 38, 41, .07);
+}
+.screen-deck { grid-template-rows: 46px minmax(0, 1fr); }
+.screen-nav {
+  padding: 7px 9px;
+  border-bottom-color: #ece7e4;
+  background: linear-gradient(180deg, #fff, #faf8f7);
+}
+.screen-arrow { width: 30px; height: 30px; border-radius: 10px; box-shadow: 0 2px 6px rgba(40, 33, 36, .04); }
+.screen-nav-copy span { font-size: 9px; }
+.screen-nav-copy strong { font-size: 13px; }
+.screen-dot { width: 7px; height: 7px; }
+.screen-dot.active { width: 17px; box-shadow: 0 2px 5px rgba(181, 31, 69, .22); }
+.screen-stage { background: #fbfaf9; }
+.screen-panel { background: #fff; }
+
+.screen-panel .zone-tabs {
+  top: 8px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 4px;
+  padding: 4px;
+  border: 1px solid #eee9e6;
+  border-radius: 12px;
+  background: rgba(250, 248, 247, .94);
+  box-shadow: 0 4px 12px rgba(39, 31, 34, .04);
+}
+.screen-panel .zone-tab { border-radius: 9px; padding: 9px; font-size: 12px; }
+.screen-panel .insight-panel { padding: 11px 13px 0; }
+.screen-panel .insight-compact,
+.screen-panel .risk-compact { border-radius: 13px; box-shadow: 0 5px 16px rgba(73, 42, 52, .05); }
+.screen-panel .insight-label,
+.screen-panel .insight-compact small,
+.screen-panel .risk-summary-copy small,
+.screen-panel .event-tag-row span,
+.screen-panel .appeal-row > span { font-size: 10px; }
+.screen-panel .insight-metrics span,
+.screen-panel .zone-heading p,
+.screen-panel .difference-count { font-size: 10px; }
+.screen-panel .insight-metrics b { font-size: 13px; }
+.screen-panel .compact-details > summary,
+.screen-panel .sub-details > summary,
+.screen-panel .appeal-row blockquote,
+.screen-panel .appeal-row p,
+.screen-panel .timeline-top,
+.screen-panel .timeline-item p,
+.screen-panel .timeline-alert p,
+.screen-panel .timeline-differences > summary { font-size: 11px; }
+.screen-panel .timeline-item > div > strong,
+.screen-panel .timeline-alert > strong,
+.screen-panel .zone-heading h3 { font-size: 12px; }
+.screen-panel .event-tag-row span { padding: 5px 8px; }
+.screen-panel .appeal-brief { padding: 10px 13px 15px; }
+.screen-panel .appeal-row { grid-template-columns: 72px minmax(0, 1fr); padding: 9px 0; }
+.screen-panel.timeline-zone { padding: 14px; }
+.timeline-alert,
+.risk-reason,
+.sub-details { border-radius: 11px; }
+
+.action-screen { padding: 13px; background: #f8f6f4; }
+.action-screen .reply-pane,
+.action-details { border-radius: 14px; box-shadow: 0 5px 16px rgba(44, 35, 38, .05); }
+.action-screen .reply-pane { padding: 13px; }
+.action-screen .reply-pane header strong { font-size: 13px; }
+.action-screen .reply-pane header span,
+.action-screen .reply-guidance > summary,
+.action-screen .reply-guidance > div > span,
+.action-screen .reply-guidance .list-clean li,
+.action-details .simulation-checks span,
+.action-details .experience-row p { font-size: 10px; }
+.action-screen .reply-pane textarea,
+.action-details > summary,
+.action-details .experience-row strong { font-size: 11px; }
+.action-screen .reply-pane textarea,
+.reply-guidance,
+.simulated-bubble,
+.experience-list,
+.case-list { border-radius: 11px; }
+.button { border-radius: 10px; }
+
+.chat-dock {
+  padding: 12px;
+  border-top: 1px solid rgba(216, 210, 206, .92);
+  background: linear-gradient(180deg, #fff 0%, #fcfbfa 100%);
+}
+.chat-dock > header { margin-bottom: 10px; }
+.chat-dock > header strong { font-size: 13px; }
+.chat-dock > header > div > span,
+.chat-context { font-size: 9px; }
+.chat-context { padding: 4px 8px; border-radius: 9px; }
+.chat-dock .chat-log { padding: 3px 4px 4px; }
+.chat-dock .chat-message { grid-template-columns: 27px minmax(0, 1fr); gap: 7px; margin: 0 30px 9px 0; }
+.chat-dock .chat-message > span { width: 26px; height: 26px; font-size: 9px; box-shadow: 0 3px 8px rgba(33, 28, 31, .14); }
+.chat-dock .chat-message p {
+  padding: 9px 11px;
+  border: 1px solid #eeeae7;
+  border-radius: 5px 13px 13px 13px;
+  background: #f5f3f1;
+  font-size: 11px;
+  line-height: 1.6;
+  box-shadow: 0 3px 10px rgba(45, 37, 40, .035);
+}
+.chat-dock .chat-message.user {
+  grid-template-columns: minmax(0, 1fr) 27px;
+  margin: 0 0 9px 38px;
+}
+.chat-dock .chat-message.user > span { grid-column: 2; grid-row: 1; background: #4778a9; }
+.chat-dock .chat-message.user p {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  border-color: #d7e6f5;
+  border-radius: 13px 5px 13px 13px;
+  background: linear-gradient(135deg, #eaf3fb, #e2eef9);
+  color: #294d70;
+}
+.chat-dock .chat-suggestions { margin: 6px 0 8px 34px; gap: 6px; }
+.chat-dock .chat-suggestions button { padding: 5px 10px; border-radius: 999px; font-size: 10px; }
+.chat-dock .chat-form { grid-template-columns: 1fr 38px; gap: 7px; }
+.chat-dock .chat-form input {
+  padding: 10px 12px;
+  border-color: #dfdad6;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 11px;
+  box-shadow: inset 0 1px 2px rgba(40, 32, 35, .025);
+}
+.chat-dock .chat-form input:focus { border-color: #d48aa0; box-shadow: 0 0 0 3px var(--accent-soft); }
+.chat-dock .chat-form button {
+  border-radius: 12px;
+  background: linear-gradient(145deg, #c32b51, #a8183d);
+  box-shadow: 0 5px 12px rgba(181, 31, 69, .22);
+}
+
+.assistant-screen { padding: 15px; background: #f8f6f4; }
+.assistant-result-head h3 { font-size: 17px; }
+.assistant-result-head > span,
+.assistant-result-head p,
+.product-focus-card small,
+.product-focus-card p,
+.assistant-data-grid span,
+.assistant-ticket span,
+.assistant-risk-hero p { font-size: 10px; }
+.product-focus-card,
+.assistant-data-grid > div,
+.assistant-callout,
+.assistant-empty,
+.assistant-ticket,
+.assistant-risk-hero,
+.assistant-emotion,
+.assistant-action-list article { border-radius: 13px; box-shadow: 0 5px 16px rgba(42, 34, 37, .045); }
+.product-focus-card strong,
+.assistant-data-grid b,
+.assistant-callout b,
+.assistant-callout p,
+.assistant-empty,
+.assistant-ticket p,
+.assistant-action-list article > span,
+.assistant-action-list p { font-size: 11px; }
+.assistant-ticket strong,
+.assistant-risk-hero > div:last-child > strong { font-size: 12px; }
+
+/* 经验中枢同步采用同一套字号与圆角语言 */
+.experience-screen { background: #f8f6f4; }
+.experience-hero { border-radius: 0 0 15px 15px; }
+.experience-hero > div:first-child > span,
+.experience-count span,
+.experience-section-head span,
+.precedent-status small,
+.precedent-reasons span,
+.precedent-summary span,
+.experience-footer span { font-size: 9px; }
+.experience-hero p,
+.experience-stats span,
+.experience-search input,
+.experience-search button,
+.experience-filters button,
+.experience-section-head > button,
+.precedent-head > div:last-child > p,
+.precedent-summary p,
+.precedent-guidance p,
+.precedent-feedback button,
+.precedent-actions .button,
+.experience-empty p,
+.experience-footer strong { font-size: 10px; }
+.experience-section-head strong,
+.precedent-head > div:last-child > strong,
+.experience-empty strong { font-size: 11px; }
+.experience-stats b { font-size: 12px; }
+.experience-search input,
+.experience-search button,
+.precedent-card,
+.experience-empty,
+.experience-entry-card,
+.precedent-modal-head,
+.precedent-modal-result { border-radius: 12px; }
+.precedent-card { padding: 12px; box-shadow: 0 5px 15px rgba(42, 34, 37, .045); }
+
+@media (max-height: 760px) {
+  .copilot-board { grid-template-rows: minmax(0, 1fr) minmax(235px, 44%); }
+}
