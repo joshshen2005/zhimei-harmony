@@ -71,7 +71,11 @@
   }
 
   function extractShades(text) {
-    return compact((safe(text).match(/#\d{2}[^\s，。；、~）)]+/g) || []).map((v) => v.replace(/[，。！!？?]+$/, "")));
+    return compact((safe(text).match(/#\d{2}[^\s，。；、~）)]+/g) || []).map((value) => {
+      const shade = value.replace(/[，。！!？?]+$/, "");
+      const sentenceSuffix = shade.search(/(?:不适合|不喜欢|原样|就行|就好|没法|不能|换货|收到)/);
+      return sentenceSuffix > 3 ? shade.slice(0, sentenceSuffix) : shade;
+    }));
   }
 
   function summarizeRequest(messages, sceneMajor, sceneMinor, order) {

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="知美 AI 客服副驾比赛级可运行原型" />
     <title>知美 AI 客服副驾</title>
-    <link rel="stylesheet" href="styles.css?v=ui-20260930-2" />
+    <link rel="stylesheet" href="styles.css?v=experience-20261001-2" />
   </head>
   <body>
     <div class="app-shell">
@@ -71,10 +71,12 @@
 
         <aside class="copilot-panel" aria-label="知美 AI 客服副驾插件">
           <div class="copilot-heading">
-            <div>
-              <span class="eyebrow">AI COPILOT</span>
-              <h2>知美副驾</h2>
-              <p id="copilot-session">当前会话分析</p>
+            <div class="copilot-brand-line">
+              <span class="copilot-mark" aria-hidden="true">知</span>
+              <div>
+                <h2>知美副驾</h2>
+                <p id="copilot-session">当前会话</p>
+              </div>
             </div>
             <button id="analysis-state" class="analysis-state" type="button" title="配置或检查AI连接"><span></span><b>本地规则</b></button>
           </div>
@@ -108,9 +110,10 @@
     </div>
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
     <script src="data.js"></script>
-    <script src="core.js"></script>
+    <script src="core.js?v=experience-20261001-2"></script>
     <script src="config.js"></script>
     <script src="ai-client.js"></script>
-    <script src="app.js?v=ui-20260930-2"></script>
+    <script src="experience-core.js?v=experience-20261001-2"></script>
+    <script src="app.js?v=experience-20261001-2"></script>
   </body>
 </html>

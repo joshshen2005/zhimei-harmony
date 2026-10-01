@@ -4,7 +4,8 @@
   const data = window.ZHIMEI_DATA;
   const core = window.ZhimeiCore;
   const aiClient = window.ZhimeiAI;
-  if (!data || !core) {
+  const experience = window.ZhimeiExperience;
+  if (!data || !core || !experience) {
     document.body.innerHTML = "<p style='padding:24px'>数据或分析模块加载失败。请通过本地服务器打开。</p>";
     return;
   }
@@ -14,8 +15,11 @@
     summaries: [], filtered: [], selectedId: "S00018", riskFilter: "",
     risks: readStorage("zhimei-risk-events", []), cases: readStorage("zhimei-cases", []),
     aiCache: new Map(), aiLoading: new Set(), aiErrors: new Map(), aiAttempted: new Set(),
-    copilotView: { insight: "emotion", bottom: "workbench" },
-    copilotChats: new Map(), replyPreviews: new Map(),
+    copilotView: { insight: "emotion", screen: "insight" },
+    copilotChats: new Map(), replyPreviews: new Map(), assistantPanels: new Map(),
+    experienceView: { query: "", status: "全部" },
+    experienceSelections: new Map(),
+    experienceFeedback: readStorage("zhimei-experience-feedback", []),
   };
   const el = {
     clock: byId("clock"), sessionCount: byId("session-count"), sessionList: byId("session-list"),
@@ -273,6 +277,8 @@
       </button>`).join("") || `<div class="empty-state">没有符合筛选条件的会话。</div>`;
     el.sessionList.querySelectorAll("[data-session]").forEach((button) => button.addEventListener("click", () => {
       state.selectedId = button.dataset.session;
+      state.copilotView.screen = "insight";
+      state.experienceView = { query: "", status: "全部" };
       renderSessionList();
       renderWorkspace();
     }));
@@ -317,104 +323,153 @@
     const risks = a.risk.reasons.length ? a.risk.reasons.map((item) => `<article class="risk-reason"><div><span class="risk-category">${esc(item.category)}</span><span class="risk-tag ${riskClass(item.level)}">${esc(item.level)}</span></div><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p></article>`).join("") : `<div class="empty-state compact">当前未识别到明确风险触发项，仍需人工确认。</div>`;
     const manualRisks = currentRisks();
     const manualRiskHtml = manualRisks.length ? manualRisks.map(riskEventHtml).join("") : `<p class="inline-empty">尚未创建人工确认的风险事件。</p>`;
-    const similar = state.summaries.filter((item) => item.id !== a.sessionId && (item.sceneMinor === a.sceneMinor || item.sceneMajor === a.sceneMajor)).slice(0, 3);
-    const similarHtml = similar.length ? similar.map((item) => `<article class="experience-row"><div><strong>${esc(item.sceneMinor)} · ${esc(item.id)}</strong><p>${item.sceneMinor === a.sceneMinor ? "高" : "中"}适用度 · 复用前需核对当前规则和执行阶段</p></div><button class="button secondary small" data-preview-session="${esc(item.id)}" type="button">查看 AI 摘要</button></article>`).join("") : `<div class="empty-state compact">暂无可参考的同类会话。</div>`;
-    const caseHtml = state.cases.filter((item) => item.sessionId === state.selectedId || item.status === "已审核").map(caseItemHtml).join("") || `<p class="inline-empty">暂无人工沉淀案例。</p>`;
+    const knowledgeLibrary = experience.buildLibrary(state.summaries, state.cases);
+    const knowledgeStats = experience.stats(knowledgeLibrary);
+    const recommendedCases = experience.retrieve(a, knowledgeLibrary, { limit: 5 });
+    const browsingLibrary = state.experienceView.query || state.experienceView.status !== "全部";
+    const experienceResults = browsingLibrary
+      ? experience.search(knowledgeLibrary, state.experienceView.query, state.experienceView.status).slice(0, 12)
+      : recommendedCases;
     const appealQuotes = customerAppealQuotes(a);
     const intensity = Number(emotion.vad.arousal) >= 4 ? "高" : Number(emotion.vad.arousal) >= 3 ? "中" : "低";
     const trendIcon = /升|加剧|恶化|上/.test(emotion.trend) ? "↗" : /降|缓和|改善|下/.test(emotion.trend) ? "↘" : "→";
     const eventTags = unique([a.sceneMinor, ...(a.conflicts.length ? [`${a.conflicts.length}项数据差异`] : []), ...(a.unanswered.length ? [`${a.unanswered.length}个问题待答`] : []), ...(a.commitments.length ? ["承诺待核验"] : [])]).slice(0, 4);
     const chats = ensureCopilotChat(a);
     const preview = state.replyPreviews.get(state.selectedId) || a.draft;
+    const selectedExperienceIds = state.experienceSelections.get(state.selectedId) || [];
+    const selectedExperiences = selectedExperienceIds.map((id) => knowledgeLibrary.find((item) => item.id === id)).filter(Boolean);
+    const guidedActions = unique([...selectedExperiences.flatMap((item) => item.actions.slice(0, 2)), ...a.actions]).slice(0, 7);
+    const assistantPanel = state.assistantPanels.get(state.selectedId);
+    const screenMeta = [
+      { key: "insight", label: "洞察", title: "诉求与判断" },
+      { key: "verify", label: "核验", title: "业务核验" },
+      { key: "experience", label: "经验", title: "经验中枢" },
+      { key: "actions", label: "执行", title: "回复与闭环" },
+      ...(assistantPanel ? [{ key: "assistant", label: "AI", title: assistantPanel.title }] : []),
+    ];
+    if (!screenMeta.some((screen) => screen.key === state.copilotView.screen)) state.copilotView.screen = "insight";
+    const activeScreenIndex = screenMeta.findIndex((screen) => screen.key === state.copilotView.screen);
 
     el.content.innerHTML = `
       <div class="copilot-board">
-        <section id="module-overview" class="copilot-zone overview-zone" aria-label="当前判断概览">
-          <div class="zone-tabs" role="tablist" aria-label="情绪与风险">
-            <button class="zone-tab ${state.copilotView.insight === "emotion" ? "active" : ""}" data-insight-tab="emotion" role="tab" aria-selected="${state.copilotView.insight === "emotion"}" type="button">情绪</button>
-            <button class="zone-tab ${state.copilotView.insight === "risk" ? "active" : ""}" data-insight-tab="risk" role="tab" aria-selected="${state.copilotView.insight === "risk"}" type="button">风险 <span class="mini-risk ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}</span></button>
-          </div>
+        <section class="screen-deck" aria-label="AI 副驾内容分屏">
+          <header class="screen-nav">
+            <button class="screen-arrow" data-screen-direction="-1" type="button" aria-label="上一个分屏">‹</button>
+            <div class="screen-nav-copy"><span id="screen-kicker">${esc(screenMeta[activeScreenIndex].label)} · ${activeScreenIndex + 1}/${screenMeta.length}</span><strong id="screen-title">${esc(screenMeta[activeScreenIndex].title)}</strong></div>
+            <div class="screen-dots" role="tablist" aria-label="分屏选择">${screenMeta.map((screen, index) => `<button class="screen-dot ${screen.key === state.copilotView.screen ? "active" : ""}" data-screen-target="${screen.key}" data-screen-label="${esc(screen.label)}" data-screen-title="${esc(screen.title)}" role="tab" aria-selected="${screen.key === state.copilotView.screen}" aria-label="${esc(screen.title)}" type="button"></button>`).join("")}</div>
+            <button class="screen-arrow" data-screen-direction="1" type="button" aria-label="下一个分屏">›</button>
+          </header>
 
-          <div id="module-emotion" class="insight-panel" data-insight-panel="emotion" ${state.copilotView.insight === "emotion" ? "" : "hidden"}>
-            <div class="insight-compact" tabindex="0">
-              <div><span class="insight-label">当前策略组</span><strong>${esc(emotion.groupZh)}</strong><small>${esc(emotion.groupEn)}</small></div>
-              <div class="insight-metrics"><span><b>${intensity}</b>强度</span><span><b>${trendIcon}</b>${esc(emotion.trend)}</span><span><b>${emotion.confidence}%</b>置信度</span></div>
-              <div class="insight-hover-tip">悬停或展开查看判断依据</div>
-            </div>
-            <details class="compact-details"><summary>情绪依据与沟通策略</summary><div class="insight-detail-scroll">
-              <div class="emotion-tags">${labels}</div>
-              <div class="vad-grid">${vadMeter("V", "愉悦度", emotion.vad.valence, "正负面")} ${vadMeter("A", "唤醒度", emotion.vad.arousal, "激动程度")} ${vadMeter("D", "掌控感", emotion.vad.dominance, "控制感")}</div>
-              <div class="emotion-facts"><div><span>建议策略</span><b>${esc(emotion.responseStrategies.join("、"))}</b></div><div><span>明确偏好</span><b>${esc(a.preferences.join("；") || "客户尚未明确选择处理方式")}</b></div><div><span>判断来源</span><b>${esc(emotion.method)}</b></div></div>
-              <details class="sub-details"><summary>每轮客户情绪变化</summary><div class="emotion-trajectory">${emotion.trajectory.map(trajectoryPoint).join("")}</div></details>
-              <details class="sub-details"><summary>GoEmotions 28 种完整标签</summary><p class="detail-note">细标签允许多选；高亮项是本会话当前识别结果。</p><div class="taxonomy-grid">${taxonomy}</div></details>
-            </div></details>
-          </div>
+          <div class="screen-stage">
+            <section id="module-overview" class="screen-panel overview-zone" data-screen-panel="insight" aria-label="当前判断概览" ${state.copilotView.screen === "insight" ? "" : "hidden"}>
+              <div class="zone-tabs" role="tablist" aria-label="情绪与风险">
+                <button class="zone-tab ${state.copilotView.insight === "emotion" ? "active" : ""}" data-insight-tab="emotion" role="tab" aria-selected="${state.copilotView.insight === "emotion"}" type="button">情绪洞察</button>
+                <button class="zone-tab ${state.copilotView.insight === "risk" ? "active" : ""}" data-insight-tab="risk" role="tab" aria-selected="${state.copilotView.insight === "risk"}" type="button">风险 <span class="mini-risk ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}</span></button>
+              </div>
+              <div id="module-emotion" class="insight-panel" data-insight-panel="emotion" ${state.copilotView.insight === "emotion" ? "" : "hidden"}>
+                <div class="insight-compact" tabindex="0">
+                  <div><span class="insight-label">当前策略组</span><strong>${esc(emotion.groupZh)}</strong><small>${esc(emotion.groupEn)}</small></div>
+                  <div class="insight-metrics"><span><b>${intensity}</b>强度</span><span><b>${trendIcon}</b>${esc(emotion.trend)}</span><span><b>${emotion.confidence}%</b>置信度</span></div>
+                </div>
+                <details class="compact-details"><summary>情绪依据与沟通策略</summary><div class="insight-detail-scroll">
+                  <div class="emotion-tags">${labels}</div>
+                  <div class="vad-grid">${vadMeter("V", "愉悦度", emotion.vad.valence, "正负面")} ${vadMeter("A", "唤醒度", emotion.vad.arousal, "激动程度")} ${vadMeter("D", "掌控感", emotion.vad.dominance, "控制感")}</div>
+                  <div class="emotion-facts"><div><span>建议策略</span><b>${esc(emotion.responseStrategies.join("、"))}</b></div><div><span>明确偏好</span><b>${esc(a.preferences.join("；") || "客户尚未明确选择处理方式")}</b></div><div><span>判断来源</span><b>${esc(emotion.method)}</b></div></div>
+                  <details class="sub-details"><summary>每轮客户情绪变化</summary><div class="emotion-trajectory">${emotion.trajectory.map(trajectoryPoint).join("")}</div></details>
+                  <details class="sub-details"><summary>GoEmotions 28 种完整标签</summary><p class="detail-note">细标签允许多选；高亮项是本会话当前识别结果。</p><div class="taxonomy-grid">${taxonomy}</div></details>
+                </div></details>
+              </div>
+              <div id="module-risk" class="insight-panel" data-insight-panel="risk" ${state.copilotView.insight === "risk" ? "" : "hidden"}>
+                <div class="risk-compact" tabindex="0">
+                  <div class="risk-ring small" style="--risk-score:${a.risk.score * 3.6}deg"><b>${a.risk.score}</b><span>风险分</span></div>
+                  <div class="risk-summary-copy"><span class="risk-tag ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险</span><strong>${esc(a.risk.nextAction)}</strong><small>${esc(a.risk.owner)} · ${esc(a.risk.responseSla)}</small></div>
+                </div>
+                <details class="compact-details"><summary>异常依据与跟进闭环</summary><div class="insight-detail-scroll">
+                  <div class="risk-reason-grid">${risks}</div>
+                  <details class="sub-details" ${manualRisks.length ? "open" : ""}><summary>人工跟进事件（${manualRisks.length}）</summary><div>${manualRiskHtml}</div></details>
+                  <button id="create-risk" class="button primary full-button" type="button">人工确认并创建风险事件</button>
+                </div></details>
+              </div>
+              <div class="appeal-brief">
+                <div class="event-tag-row">${eventTags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>
+                <div class="appeal-row"><span>核心诉求</span><blockquote>“${esc(appealQuotes.primary)}”</blockquote></div>
+                <div class="appeal-row secondary"><span>次要诉求</span><p>${esc(appealQuotes.secondary)}</p></div>
+                <div class="appeal-row action"><span>建议解决方式</span><p>${esc(a.actions[0] || "先核验事实，再向客户说明可执行方案")}</p></div>
+              </div>
+              ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
+            </section>
 
-          <div id="module-risk" class="insight-panel" data-insight-panel="risk" ${state.copilotView.insight === "risk" ? "" : "hidden"}>
-            <div class="risk-compact" tabindex="0">
-              <div class="risk-ring small" style="--risk-score:${a.risk.score * 3.6}deg"><b>${a.risk.score}</b><span>风险分</span></div>
-              <div class="risk-summary-copy"><span class="risk-tag ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险</span><strong>${esc(a.risk.nextAction)}</strong><small>${esc(a.risk.owner)} · ${esc(a.risk.responseSla)}</small></div>
-            </div>
-            <details class="compact-details"><summary>异常依据与跟进闭环</summary><div class="insight-detail-scroll">
-              <div class="risk-reason-grid">${risks}</div>
-              <details class="sub-details" ${manualRisks.length ? "open" : ""}><summary>人工跟进事件（${manualRisks.length}）</summary><div>${manualRiskHtml}</div></details>
-              <button id="create-risk" class="button primary full-button" type="button">人工确认并创建风险事件</button>
-            </div></details>
-          </div>
+            <section id="module-verify" class="screen-panel timeline-zone" data-screen-panel="verify" aria-label="业务核验时间线" ${state.copilotView.screen === "verify" ? "" : "hidden"}>
+              <header class="zone-heading"><div><span class="zone-index">02</span><div><h3>业务核验时间线</h3><p>聊天、订单与工单统一核对</p></div></div><span class="difference-count">${a.conflicts.length} 项差异</span></header>
+              <div class="timeline-scroll"><div class="business-timeline">${buildTimeline(a).map(timelineItem).join("")}</div></div>
+              <details class="timeline-differences"><summary>查看数据差异与证据</summary><div class="timeline-alerts">${conflicts}</div></details>
+            </section>
 
-          <div class="appeal-brief">
-            <div class="event-tag-row">${eventTags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>
-            <div class="appeal-row"><span>核心诉求</span><blockquote>“${esc(appealQuotes.primary)}”</blockquote></div>
-            <div class="appeal-row secondary"><span>次要诉求</span><p>${esc(appealQuotes.secondary)}</p></div>
-            <div class="appeal-row action"><span>建议解决方式</span><p>${esc(a.actions[0] || "先核验事实，再向客户说明可执行方案")}</p></div>
+            <section id="module-experience" class="screen-panel experience-screen" data-screen-panel="experience" aria-label="经验中枢" ${state.copilotView.screen === "experience" ? "" : "hidden"}>
+              <header class="experience-hero">
+                <div><span>ZHIMEI EXPERIENCE HUB</span><h3>经验中枢</h3><p>从已审核历史处理提取可借鉴动作，同时标明不可照搬边界。</p></div>
+                <div class="experience-count"><b>${knowledgeStats.published}</b><span>有效经验</span></div>
+              </header>
+              <div class="experience-stats"><span><b>${knowledgeStats.total}</b>全部</span><span><b>${knowledgeStats.pending}</b>待审核</span><span><b>${selectedExperiences.length}</b>本次引用</span></div>
+              <form id="experience-search-form" class="experience-search"><input id="experience-search-input" value="${esc(state.experienceView.query)}" placeholder="搜索场景、诉求或案例编号" aria-label="搜索经验库"><button type="submit">搜索</button></form>
+              <div class="experience-filters" role="group" aria-label="案例状态筛选">${["全部", "已发布", "待审核", "已失效"].map((status) => `<button class="${state.experienceView.status === status ? "active" : ""}" data-experience-status="${status}" type="button">${status}</button>`).join("")}</div>
+              <div class="experience-section-head"><div><strong>${browsingLibrary ? "经验库检索结果" : "当前会话推荐"}</strong><span>${browsingLibrary ? `找到 ${experienceResults.length} 条` : "按事实、诉求、风险和结果质量综合排序"}</span></div>${browsingLibrary ? `<button data-reset-experience type="button">返回推荐</button>` : ""}</div>
+              <div class="experience-result-list">${experienceResults.length ? experienceResults.map((item) => experienceCardHtml(item, false)).join("") : `<div class="experience-empty"><strong>没有符合条件的经验</strong><p>可清除筛选，或先将当前处理沉淀为候选案例。</p></div>`}</div>
+              <footer class="experience-footer"><div><strong>处理完成后沉淀</strong><span>AI 生成候选，人工审核后才进入正式推荐。</span></div><button id="prepare-case" class="button primary small" type="button">生成候选案例</button></footer>
+            </section>
+
+            <section class="screen-panel action-screen" data-screen-panel="actions" aria-label="回复与闭环" ${state.copilotView.screen === "actions" ? "" : "hidden"}>
+              <article class="reply-pane">
+                <header><div><strong>建议回复</strong><span>编辑后插入人工回复框</span></div><span class="source-tag">${selectedExperiences.length ? `经验依据 ${selectedExperiences.length}` : esc(analysisSource)}</span></header>
+                ${selectedExperiences.length ? `<div class="experience-citation"><span>生成依据</span><div>${selectedExperiences.map((item) => `<button data-experience-detail="${esc(item.id)}" type="button">${esc(item.id)} · ${esc(item.sceneMinor)}</button>`).join("")}</div><button data-clear-experience type="button">清除</button></div>` : ""}
+                <textarea id="ai-draft" aria-label="AI 建议回复">${esc(a.draft)}</textarea>
+                <details class="reply-guidance"><summary>行动与承诺边界</summary><div><span>建议行动</span>${list(guidedActions, true)}<span>暂不能承诺</span>${list(a.doNotCommit)}</div></details>
+                <div class="pane-actions"><button id="preview-draft" class="button secondary small" type="button">预览效果</button><button id="insert-draft" class="button primary small" type="button">插入人工回复</button></div>
+              </article>
+              <details class="action-details"><summary>回复模拟</summary><div class="simulated-bubble">${esc(preview)}</div><div class="simulation-checks"><span>✓ 通俗表达</span><span>✓ 保留人工确认</span><span>${a.riskLevel === "高" ? "! 高风险需复核" : "✓ 风险可控"}</span></div></details>
+              <div class="experience-entry-card"><div><strong>经验中枢</strong><span>${recommendedCases.length} 条相关经验 · ${selectedExperiences.length} 条已引用</span></div><button class="button secondary small" data-open-experience type="button">查看与选择</button></div>
+            </section>
+
+            ${assistantPanel ? `<section class="screen-panel assistant-screen" data-screen-panel="assistant" aria-label="AI 唤出内容" ${state.copilotView.screen === "assistant" ? "" : "hidden"}>${assistantPanelHtml(a, assistantPanel)}</section>` : ""}
           </div>
-          ${a.needsHumanReview ? `<div class="ai-review-notice"><strong>需人工复核</strong><span>${esc(a.reviewReason || "模型对当前判断信心不足或存在高风险信息。")}</span></div>` : ""}
         </section>
 
-        <section id="module-verify" class="copilot-zone timeline-zone" aria-label="业务核验时间线">
-          <header class="zone-heading"><div><span class="zone-index">02</span><div><h3>业务核验时间线</h3><p>只保留会改变状态、责任或判断的节点</p></div></div><span class="difference-count">${a.conflicts.length} 项差异</span></header>
-          <div class="timeline-scroll"><div class="business-timeline">${buildTimeline(a).map(timelineItem).join("")}</div></div>
-          <details class="timeline-differences"><summary>查看数据差异与证据</summary><div class="timeline-alerts">${conflicts}</div></details>
-        </section>
-
-        <section class="copilot-zone workbench-zone" aria-label="回复与经验工作台">
-          <div class="zone-tabs bottom-tabs" role="tablist" aria-label="回复工作台页面">
-            <button class="zone-tab ${state.copilotView.bottom === "workbench" ? "active" : ""}" data-bottom-tab="workbench" role="tab" aria-selected="${state.copilotView.bottom === "workbench"}" type="button">回复与 AI 对话</button>
-            <button class="zone-tab ${state.copilotView.bottom === "experience" ? "active" : ""}" data-bottom-tab="experience" role="tab" aria-selected="${state.copilotView.bottom === "experience"}" type="button">模拟与经验</button>
-          </div>
-
-          <div id="module-reply" class="workbench-page" data-bottom-panel="workbench" ${state.copilotView.bottom === "workbench" ? "" : "hidden"}>
-            <article class="reply-pane">
-              <header><div><strong>建议回复</strong><span>可直接编辑</span></div><span class="source-tag">${esc(analysisSource)}</span></header>
-              <textarea id="ai-draft" aria-label="AI 建议回复">${esc(a.draft)}</textarea>
-              <details class="reply-guidance"><summary>行动与承诺边界</summary><div><span>建议行动</span>${list(a.actions, true)}<span>暂不能承诺</span>${list(a.doNotCommit)}</div></details>
-              <div class="pane-actions"><button id="preview-draft" class="button secondary small" type="button">预览效果</button><button id="insert-draft" class="button primary small" type="button">插入人工回复</button></div>
-            </article>
-            <article class="chat-pane">
-              <header><div><strong>AI 对话</strong><span>围绕当前会话追问</span></div><span class="online-dot" title="基于当前分析"></span></header>
-              <div id="copilot-chat-log" class="chat-log">${chats.map((message) => `<div class="chat-message ${message.role}"><span>${message.role === "assistant" ? "AI" : "我"}</span><p>${esc(message.text)}</p></div>`).join("")}</div>
-              <div class="chat-suggestions"><button data-chat-prompt="风险点是什么？" type="button">风险点</button><button data-chat-prompt="我该先做什么？" type="button">下一步</button></div>
-              <form id="copilot-chat-form" class="chat-form"><input id="copilot-chat-input" aria-label="向 AI 追问" placeholder="追问当前会话…" autocomplete="off"><button type="submit" aria-label="发送">↑</button></form>
-            </article>
-          </div>
-
-          <div id="module-experience" class="workbench-page experience-page" data-bottom-panel="experience" ${state.copilotView.bottom === "experience" ? "" : "hidden"}>
-            <article class="simulation-pane">
-              <header><strong>回复模拟结果</strong><span>发送前预览</span></header>
-              <div class="simulated-bubble">${esc(preview)}</div>
-              <div class="simulation-checks"><span>✓ 通俗表达</span><span>✓ 保留人工确认</span><span>${a.riskLevel === "高" ? "! 高风险需复核" : "✓ 风险可控"}</span></div>
-            </article>
-            <article class="experience-pane">
-              <header><strong>经验参考</strong><span>点击后弹窗查看 AI 摘要</span></header>
-              <div class="experience-list">${similarHtml}</div>
-              <details class="sub-details"><summary>案例沉淀与审核</summary><div>${caseHtml}</div></details>
-              <button id="prepare-case" class="button secondary full-button" type="button">生成候选案例</button>
-            </article>
-          </div>
+        <section class="chat-dock" aria-label="AI 对话">
+          <header><div><strong><span class="online-dot" aria-hidden="true"></span>AI 对话</strong><span>提问后，上方会自动切换到对应内容</span></div><span class="chat-context">当前会话</span></header>
+          <div id="copilot-chat-log" class="chat-log">${chats.map((message) => `<div class="chat-message ${message.role}"><span>${message.role === "assistant" ? "AI" : "我"}</span><p>${esc(message.text)}</p></div>`).join("")}</div>
+          <div class="chat-suggestions"><button data-chat-prompt="找相似经验" type="button">相似经验</button><button data-chat-prompt="调出产品信息" type="button">产品信息</button><button data-chat-prompt="风险点是什么？" type="button">风险点</button><button data-chat-prompt="我该先做什么？" type="button">下一步</button></div>
+          <form id="copilot-chat-form" class="chat-form"><input id="copilot-chat-input" aria-label="向 AI 追问" placeholder="问产品、订单、风险或下一步…" autocomplete="off"><button type="submit" aria-label="发送">↑</button></form>
         </section>
       </div>`;
 
     bindDashboardEvents();
+  }
+
+  function experienceFeedbackFor(caseId) {
+    return [...state.experienceFeedback].reverse().find((item) => item.caseId === caseId && item.sessionId === state.selectedId);
+  }
+
+  function experienceCardHtml(item, compact) {
+    const feedback = experienceFeedbackFor(item.id);
+    const selectedIds = state.experienceSelections.get(state.selectedId) || [];
+    const selected = selectedIds.includes(item.id);
+    const score = Number(item.matchScore) || Number(item.qualityScore) || 0;
+    const reasons = (item.matchReasons || []).map((reason) => `<span>${esc(reason)}</span>`).join("");
+    if (compact) {
+      return `<article class="experience-row"><div><strong>${esc(item.sceneMinor)} · ${esc(item.id)}</strong><p>${score}% 适用度 · ${esc((item.matchReasons || ["同类历史处理"])[0])}</p></div><button class="button secondary small" data-experience-detail="${esc(item.id)}" type="button">查看依据</button></article>`;
+    }
+    const actionButton = item.status === "已发布"
+      ? `<button class="button ${selected ? "secondary" : "primary"} small" data-apply-experience="${esc(item.id)}" type="button">${selected ? "已加入方案" : "加入解决方案"}</button>`
+      : item.status === "待审核"
+        ? `<button class="button primary small" data-approve-case="${esc(item.id)}" type="button">审核发布</button>`
+        : `<button class="button secondary small" type="button" disabled>已停止推荐</button>`;
+    return `<article class="precedent-card ${selected ? "selected" : ""}">
+      <div class="precedent-head"><div class="precedent-score"><b>${score}</b><span>${item.matchScore ? "适用度" : "质量分"}</span></div><div><div class="precedent-status"><span class="status-chip ${item.status === "已发布" ? "active" : ""}">${esc(item.status)}</span><small>${esc(item.ruleVersion)}</small></div><strong>${esc(item.title)}</strong><p>${esc(item.id)} · ${esc(item.sceneMajor)} / ${esc(item.sceneMinor)} · ${esc(item.riskLevel)}风险</p></div></div>
+      ${reasons ? `<div class="precedent-reasons">${reasons}</div>` : ""}
+      <div class="precedent-summary"><div><span>历史诉求</span><p>${esc(item.request)}</p></div><div><span>处理结果</span><p>${esc(item.outcome)} · ${esc(item.outcomeConfidence)}置信</p></div></div>
+      <div class="precedent-guidance"><p><b>可借鉴</b>${esc(item.actions[0] || "查看完整处理步骤")}</p><p><b>不可照搬</b>${esc(item.boundary[0] || "仍需按当前事实与规则核验")}</p></div>
+      <div class="precedent-actions"><div class="precedent-feedback"><button class="${feedback && feedback.value === "有效" ? "active" : ""}" data-experience-feedback="有效" data-experience-id="${esc(item.id)}" type="button">有效</button><button class="${feedback && feedback.value === "不适用" ? "active" : ""}" data-experience-feedback="不适用" data-experience-id="${esc(item.id)}" type="button">不适用</button></div><button class="button secondary small" data-experience-detail="${esc(item.id)}" type="button">完整案例</button>${actionButton}</div>
+    </article>`;
   }
 
   function customerAppealQuotes(a) {
@@ -433,12 +488,47 @@
   }
 
   function buildCopilotChatReply(a, prompt) {
+    if (/经验|案例|判例|参考/.test(prompt)) {
+      const cases = experience.retrieve(a, currentExperienceLibrary(), { limit: 3 });
+      return cases.length ? `找到${cases.length}条可参考经验：${cases.map((item) => `${item.sceneMinor}（${item.matchScore}%）`).join("、")}。我已打开经验中枢，请先核对适用条件和不可照搬边界。` : "当前没有达到推荐门槛的正式经验，可以先完成处理并生成候选案例。";
+    }
     if (/风险|升级|危险/.test(prompt)) return `当前为${a.riskLevel}风险（${a.risk.score}分）。主要依据是${a.risk.reasons.slice(0, 2).map((item) => item.title).join("、") || "暂无明确触发项"}。建议由${a.risk.owner}按“${a.risk.nextAction}”推进。`;
     if (/情绪|态度|生气|心情/.test(prompt)) return `客户当前更接近“${a.emotion.groupZh}”，强度${Number(a.emotion.vad.arousal) >= 4 ? "高" : Number(a.emotion.vad.arousal) >= 3 ? "中" : "低"}，建议采用${a.emotion.responseStrategies.join("、")}。`;
     if (/回复|怎么说|话术/.test(prompt)) return `可以先明确回应客户的问题，再说明正在核验，最后给出下一步。现有草稿是：“${a.draft}” 请在发送前核对事实和承诺。`;
     if (/事实|核验|冲突|差异/.test(prompt)) return a.conflicts.length ? `目前有${a.conflicts.length}项数据差异：${a.conflicts.map((item) => item.title).join("、")}。可在时间线下方定位聊天证据。` : "当前没有发现明确的跨源冲突，但仍需按实际业务结果做最终确认。";
     if (/下一步|先做|处理/.test(prompt)) return `建议按顺序处理：${a.actions.slice(0, 3).join("；")}。暂时不要承诺：${a.doNotCommit[0] || "未经核验的时效或结果"}。`;
     return `结合当前会话，核心是先处理“${a.request}”。我建议先${a.actions[0] || "核验事实"}，并避免承诺${a.doNotCommit[0] || "未经确认的处理结果"}。`;
+  }
+
+  function buildAssistantPanel(prompt) {
+    const value = String(prompt || "");
+    if (/产品|商品|订单|色号|套装|价格|金额|赠品/.test(value)) return { kind: "product", title: "产品与订单", prompt: value };
+    if (/物流|快递|发货|到货/.test(value)) return { kind: "logistics", title: "物流信息", prompt: value };
+    if (/工单|进度|状态/.test(value)) return { kind: "tickets", title: "关联工单", prompt: value };
+    if (/风险|升级|危险/.test(value)) return { kind: "risk", title: "风险详情", prompt: value };
+    if (/情绪|态度|生气|心情/.test(value)) return { kind: "emotion", title: "情绪策略", prompt: value };
+    if (/回复|怎么说|话术|下一步|先做|处理/.test(value)) return { kind: "action", title: "建议行动", prompt: value };
+    return { kind: "answer", title: "AI 分析结果", prompt: value };
+  }
+
+  function assistantPanelHtml(a, panel) {
+    const order = a.order;
+    const header = `<div class="assistant-result-head"><span>AI 已为你调出</span><h3>${esc(panel.title)}</h3><p>“${esc(panel.prompt)}”</p></div>`;
+    if (panel.kind === "product") {
+      const productName = order ? order["商品名称"] : (a.tickets.find((ticket) => ticket["使用商品"] || ticket["发出商品名称"]) || {})["使用商品"] || (a.tickets[0] || {})["发出商品名称"];
+      return `${header}<div class="product-focus-card"><span class="product-monogram" aria-hidden="true">美</span><div><small>当前关联产品</small><strong>${esc(productName || "当前会话未关联可核验的商品记录")}</strong><p>${order ? `货号 ${esc(order["商品货号"] || "待核验")} · 数量 ${esc(order["数量"] || 1)}` : "可继续询问客户提供商品链接、订单号或实物信息。"}</p></div></div>${order ? `<div class="assistant-data-grid"><div><span>订单状态</span><b>${esc(order["订单状态"] || "待核验")}</b></div><div><span>实付金额</span><b>¥${esc(order["实付金额(元)"] || "-")}</b></div><div><span>赠品</span><b>${esc(order["赠品"] || "无记录")}</b></div><div><span>下单时间</span><b>${esc(shortTime(order["下单时间"]))}</b></div></div>` : `<div class="assistant-empty">没有关联订单，因此不补造产品参数或库存信息。</div>`}<div class="assistant-callout"><b>服务提示</b><p>${esc(a.preferences[0] || a.actions[0] || "先确认消费者的具体产品诉求")}</p></div>`;
+    }
+    if (panel.kind === "logistics") {
+      return `${header}<div class="assistant-data-grid"><div><span>快递公司</span><b>${esc((order && order["快递公司"]) || "待核验")}</b></div><div><span>物流单号</span><b>${esc((order && order["物流单号"]) || "暂无")}</b></div><div><span>发货时间</span><b>${esc((order && order["发货时间"]) || "待发货")}</b></div><div><span>订单状态</span><b>${esc((order && order["订单状态"]) || "无关联订单")}</b></div></div><div class="assistant-callout"><b>AI 建议</b><p>${esc(a.actions.find((item) => /物流|发货|快递|核验/.test(item)) || a.actions[0])}</p></div>`;
+    }
+    if (panel.kind === "tickets") {
+      const tickets = a.tickets.length ? a.tickets.map((ticket) => `<article class="assistant-ticket"><span>${esc(ticket._ticket_type || "工单")}</span><strong>${esc(ticket["工单号"] || "编号待核验")}</strong><p>${esc(ticket["任务状态"] || ticket["工单状态"] || "状态待核验")} · ${esc(ticket["处理方案"] || "暂无处理方案")}</p></article>`).join("") : `<div class="assistant-empty">当前会话没有关联工单。</div>`;
+      return `${header}<div class="assistant-ticket-list">${tickets}</div>`;
+    }
+    if (panel.kind === "risk") return `${header}<div class="assistant-risk-hero"><div class="risk-ring" style="--risk-score:${a.risk.score * 3.6}deg"><b>${a.risk.score}</b><span>风险分</span></div><div><span class="risk-tag ${riskClass(a.riskLevel)}">${esc(a.riskLevel)}风险</span><strong>${esc(a.risk.nextAction)}</strong><p>${esc(a.risk.owner)} · ${esc(a.risk.responseSla)}</p></div></div><div class="risk-reason-grid">${a.risk.reasons.map((item) => `<article class="risk-reason"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p></article>`).join("") || `<div class="assistant-empty">暂无明确风险触发项。</div>`}</div>`;
+    if (panel.kind === "emotion") return `${header}<div class="assistant-emotion"><span>当前策略组</span><strong>${esc(a.emotion.groupZh)}</strong><p>${esc(a.emotion.responseStrategies.join("、"))}</p></div><div class="emotion-tags">${a.emotion.labels.map((label) => `<span class="emotion-tag">${esc(label.zh)} <b>${Math.round(label.probability * 100)}%</b></span>`).join("")}</div>`;
+    if (panel.kind === "action") return `${header}<div class="assistant-action-list">${a.actions.slice(0, 4).map((item, index) => `<article><span>${String(index + 1).padStart(2, "0")}</span><p>${esc(item)}</p></article>`).join("")}</div><div class="assistant-callout warning"><b>暂不能承诺</b><p>${esc(a.doNotCommit[0] || "未经核验的时效或处理结果")}</p></div><button class="button primary full-button" data-open-actions type="button">打开回复编辑分屏</button>`;
+    return `${header}<div class="assistant-callout"><b>围绕当前会话</b><p>${esc(buildCopilotChatReply(a, panel.prompt))}</p></div><div class="assistant-action-list">${a.actions.slice(0, 3).map((item, index) => `<article><span>${String(index + 1).padStart(2, "0")}</span><p>${esc(item)}</p></article>`).join("")}</div>`;
   }
 
   function vadMeter(letter, label, value, note) { return `<div class="vad-item"><div><b>${letter}</b><span>${esc(label)}</span><strong>${value}/5</strong></div><div class="vad-track"><span style="width:${value * 20}%"></span></div><small>${esc(note)}</small></div>`; }
@@ -471,12 +561,57 @@
       el.content.querySelectorAll(panelSelector).forEach((panel) => { panel.hidden = panel.dataset[`${stateKey}Panel`] !== activeValue; });
     };
     el.content.querySelectorAll("[data-insight-tab]").forEach((button) => button.addEventListener("click", () => switchPanels("[data-insight-tab]", "[data-insight-panel]", button.dataset.insightTab, "insight")));
-    el.content.querySelectorAll("[data-bottom-tab]").forEach((button) => button.addEventListener("click", () => switchPanels("[data-bottom-tab]", "[data-bottom-panel]", button.dataset.bottomTab, "bottom")));
+    const screenButtons = [...el.content.querySelectorAll("[data-screen-target]")];
+    const setScreen = (screenKey) => {
+      const nextIndex = screenButtons.findIndex((button) => button.dataset.screenTarget === screenKey);
+      if (nextIndex < 0) return;
+      state.copilotView.screen = screenKey;
+      el.content.querySelectorAll("[data-screen-panel]").forEach((panel) => { panel.hidden = panel.dataset.screenPanel !== screenKey; });
+      screenButtons.forEach((button, index) => {
+        const active = index === nextIndex;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
+      const activeButton = screenButtons[nextIndex];
+      byId("screen-kicker").textContent = `${activeButton.dataset.screenLabel} · ${nextIndex + 1}/${screenButtons.length}`;
+      byId("screen-title").textContent = activeButton.dataset.screenTitle;
+    };
+    screenButtons.forEach((button) => button.addEventListener("click", () => setScreen(button.dataset.screenTarget)));
+    el.content.querySelectorAll("[data-screen-direction]").forEach((button) => button.addEventListener("click", () => {
+      const currentIndex = screenButtons.findIndex((item) => item.dataset.screenTarget === state.copilotView.screen);
+      const nextIndex = (currentIndex + Number(button.dataset.screenDirection) + screenButtons.length) % screenButtons.length;
+      const next = screenButtons[nextIndex];
+      if (next) setScreen(next.dataset.screenTarget);
+    }));
+    el.content.querySelectorAll("[data-open-actions]").forEach((button) => button.addEventListener("click", () => setScreen("actions")));
+    el.content.querySelectorAll("[data-open-experience]").forEach((button) => button.addEventListener("click", () => setScreen("experience")));
     el.content.querySelectorAll("[data-evidence]").forEach((button) => button.addEventListener("click", focusEvidence));
     el.content.querySelectorAll("[data-preview-session]").forEach((button) => button.addEventListener("click", () => openCaseModal(button.dataset.previewSession)));
+    el.content.querySelectorAll("[data-experience-detail]").forEach((button) => button.addEventListener("click", () => openExperienceModal(button.dataset.experienceDetail)));
+    el.content.querySelectorAll("[data-apply-experience]").forEach((button) => button.addEventListener("click", () => applyExperience(button.dataset.applyExperience)));
+    el.content.querySelectorAll("[data-experience-feedback]").forEach((button) => button.addEventListener("click", () => recordExperienceFeedback(button.dataset.experienceId, button.dataset.experienceFeedback)));
     el.content.querySelectorAll("[data-risk-id][data-status]").forEach((button) => button.addEventListener("click", () => updateRisk(button.dataset.riskId, button.dataset.status)));
     el.content.querySelectorAll("[data-approve-case]").forEach((button) => button.addEventListener("click", () => updateCase(button.dataset.approveCase, "已审核")));
     el.content.querySelectorAll("[data-stop-case]").forEach((button) => button.addEventListener("click", () => updateCase(button.dataset.stopCase, "停止推荐")));
+    const experienceSearchForm = byId("experience-search-form");
+    if (experienceSearchForm) experienceSearchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      state.experienceView.query = byId("experience-search-input").value.trim();
+      renderDashboard();
+    });
+    el.content.querySelectorAll("[data-experience-status]").forEach((button) => button.addEventListener("click", () => {
+      state.experienceView.status = button.dataset.experienceStatus;
+      renderDashboard();
+    }));
+    el.content.querySelectorAll("[data-reset-experience]").forEach((button) => button.addEventListener("click", () => {
+      state.experienceView = { query: "", status: "全部" };
+      renderDashboard();
+    }));
+    el.content.querySelectorAll("[data-clear-experience]").forEach((button) => button.addEventListener("click", () => {
+      state.experienceSelections.delete(state.selectedId);
+      showToast("已清除本次引用的经验，当前回复仍保留。", false);
+      renderDashboard();
+    }));
     byId("insert-draft").addEventListener("click", () => { el.reply.value = byId("ai-draft").value; el.draftSource.textContent = "AI 草稿，等待人工审核"; showToast("草稿已插入，请审核后再发送。", false); });
     byId("preview-draft").addEventListener("click", () => {
       const draft = byId("ai-draft").value.trim();
@@ -484,7 +619,7 @@
       state.replyPreviews.set(state.selectedId, draft);
       const bubble = el.content.querySelector(".simulated-bubble");
       if (bubble) bubble.textContent = draft;
-      switchPanels("[data-bottom-tab]", "[data-bottom-panel]", "experience", "bottom");
+      showToast("回复效果已更新，可在当前分屏下方查看。", false);
     });
     const chatForm = byId("copilot-chat-form");
     const chatInput = byId("copilot-chat-input");
@@ -494,15 +629,20 @@
       const a = analysisFor(selected());
       const messages = ensureCopilotChat(a);
       messages.push({ role: "user", text: value }, { role: "assistant", text: buildCopilotChatReply(a, value) });
-      chatInput.value = "";
-      const log = byId("copilot-chat-log");
-      log.insertAdjacentHTML("beforeend", `<div class="chat-message user"><span>我</span><p>${esc(value)}</p></div><div class="chat-message assistant"><span>AI</span><p>${esc(messages[messages.length - 1].text)}</p></div>`);
-      log.scrollTop = log.scrollHeight;
+      if (/经验|案例|判例|参考/.test(value)) state.copilotView.screen = "experience";
+      else {
+        state.assistantPanels.set(state.selectedId, buildAssistantPanel(value));
+        state.copilotView.screen = "assistant";
+      }
+      renderDashboard();
+      requestAnimationFrame(() => { const log = byId("copilot-chat-log"); if (log) log.scrollTop = log.scrollHeight; });
     };
     chatForm.addEventListener("submit", (event) => { event.preventDefault(); submitChat(); });
     el.content.querySelectorAll("[data-chat-prompt]").forEach((button) => button.addEventListener("click", () => submitChat(button.dataset.chatPrompt)));
-    byId("create-risk").addEventListener("click", createRisk);
-    byId("prepare-case").addEventListener("click", prepareCase);
+    const createRiskButton = byId("create-risk");
+    const prepareCaseButton = byId("prepare-case");
+    if (createRiskButton) createRiskButton.addEventListener("click", createRisk);
+    if (prepareCaseButton) prepareCaseButton.addEventListener("click", prepareCase);
   }
 
   function focusEvidence() {
@@ -546,21 +686,73 @@
     el.modalContent.innerHTML = `<div class="modal-summary"><span>AI 归纳的核心诉求</span><strong>${esc(a.request)}</strong></div><div class="modal-grid"><div><span>可借鉴</span>${list(a.actions)}</div><div class="boundary-box"><span>不可照搬</span>${list(a.doNotCommit)}</div></div><div class="modal-notice">相似案例只提供处理思路。使用前仍需核对当前订单、规则版本、消费者选择和业务执行状态。</div>`;
     el.modal.hidden = false;
   }
+  function currentExperienceLibrary() { return experience.buildLibrary(state.summaries, state.cases); }
+  function openExperienceModal(caseId) {
+    const current = analysisFor(selected());
+    const library = currentExperienceLibrary();
+    const recommended = experience.retrieve(current, library, { limit: library.length, minimumScore: 0 });
+    const item = recommended.find((entry) => entry.id === caseId) || library.find((entry) => entry.id === caseId);
+    if (!item) return;
+    const score = Number(item.matchScore) || Number(item.qualityScore) || 0;
+    el.modalTitle.textContent = `${item.sceneMinor} · ${item.id}`;
+    el.modalContent.innerHTML = `<div class="precedent-modal-head"><div><span class="status-chip ${item.status === "已发布" ? "active" : ""}">${esc(item.status)}</span><span>${esc(item.sourceType)} · ${esc(item.ruleVersion)} · 有效至 ${esc(item.validUntil)}</span></div><strong>${score}</strong><small>${item.matchScore ? "当前适用度" : "案例质量分"}</small></div>
+      <div class="modal-summary"><span>历史客户诉求</span><strong>${esc(item.request)}</strong></div>
+      <div class="precedent-modal-result"><span>处理结果</span><strong>${esc(item.outcome)}</strong><p>${esc(item.outcomeEvidence)}</p></div>
+      <div class="modal-grid"><div><span>适用条件</span>${list(item.conditions.length ? item.conditions : ["需按当前会话事实重新核验"])}</div><div><span>可借鉴动作</span>${list(item.actions, true)}</div><div class="boundary-box"><span>不可照搬</span>${list(item.boundary.length ? item.boundary : ["未经核验的处理结果与时效"])}</div><div><span>证据引用</span>${list(item.evidence.map((entry) => `${entry.label}：${entry.text}`))}</div></div>
+      <div class="modal-notice">经验案例只提供处理依据。应用时仍以当前会话事实、最新规则、客服权限和实时业务状态为准。</div>
+      <div class="modal-actions"><button class="button secondary" type="button" data-modal-feedback="不适用">标记不适用</button>${item.status === "已发布" ? `<button id="modal-apply-experience" class="button primary" type="button">加入当前解决方案</button>` : ""}</div>`;
+    const applyButton = byId("modal-apply-experience");
+    if (applyButton) applyButton.addEventListener("click", () => { closeCaseModal(); applyExperience(item.id); });
+    const feedbackButton = el.modalContent.querySelector("[data-modal-feedback]");
+    if (feedbackButton) feedbackButton.addEventListener("click", () => { recordExperienceFeedback(item.id, "不适用"); closeCaseModal(); });
+    el.modal.hidden = false;
+  }
+  function applyExperience(caseId) {
+    const item = currentExperienceLibrary().find((entry) => entry.id === caseId && entry.status === "已发布");
+    if (!item) return showToast("该案例尚未发布或已失效，不能加入解决方案。", true);
+    const selectedIds = state.experienceSelections.get(state.selectedId) || [];
+    if (!selectedIds.includes(caseId)) state.experienceSelections.set(state.selectedId, [...selectedIds, caseId].slice(-3));
+    state.experienceFeedback = state.experienceFeedback.filter((entry) => !(entry.caseId === caseId && entry.sessionId === state.selectedId));
+    state.experienceFeedback.push({ caseId, sessionId: state.selectedId, value: "已引用", at: new Date().toISOString() });
+    saveStorage("zhimei-experience-feedback", state.experienceFeedback);
+    state.copilotView.screen = "actions";
+    showToast(`已引用 ${item.id}，处理动作已加入解决方案；历史承诺不会自动复制。`, false);
+    renderDashboard();
+  }
+  function recordExperienceFeedback(caseId, value) {
+    state.experienceFeedback = state.experienceFeedback.filter((entry) => !(entry.caseId === caseId && entry.sessionId === state.selectedId));
+    state.experienceFeedback.push({ caseId, sessionId: state.selectedId, value, at: new Date().toISOString() });
+    saveStorage("zhimei-experience-feedback", state.experienceFeedback);
+    showToast(`已记录“${value}”，将用于调整后续推荐。`, false);
+    renderDashboard();
+  }
   function closeCaseModal() { el.modal.hidden = true; }
-  function caseItemHtml(item) { return `<article class="manual-event"><div class="card-title-row"><strong>${esc(item.title)}</strong><span class="status-chip ${item.status === "已审核" ? "active" : ""}">${esc(item.status)}</span></div><p>可借鉴：${esc(item.lesson)}<br>不可照搬：${esc(item.boundary)}</p><div class="case-actions">${item.status !== "已审核" ? `<button class="button primary small" data-approve-case="${esc(item.id)}" type="button">人工审核通过</button>` : ""}<button class="button secondary small" data-stop-case="${esc(item.id)}" type="button">停止推荐</button></div></article>`; }
+  function caseItemHtml(item) { const boundary = Array.isArray(item.boundary) ? item.boundary.join("；") : item.boundary; return `<article class="manual-event"><div class="card-title-row"><strong>${esc(item.title)}</strong><span class="status-chip ${item.status === "已审核" || item.status === "已发布" ? "active" : ""}">${esc(item.status)}</span></div><p>可借鉴：${esc(item.lesson || (item.actions || []).join("；"))}<br>不可照搬：${esc(boundary)}</p><div class="case-actions">${item.status !== "已审核" && item.status !== "已发布" ? `<button class="button primary small" data-approve-case="${esc(item.id)}" type="button">审核发布</button>` : ""}<button class="button secondary small" data-stop-case="${esc(item.id)}" type="button">停止推荐</button></div></article>`; }
   function prepareCase() {
     const a = analysisFor(selected());
-    state.cases.unshift({ id: `CASE-${Date.now()}`, sessionId: state.selectedId, title: `${a.sceneMinor}处理案例`, status: "待审核", lesson: a.actions.join("；"), boundary: a.doNotCommit.join("；"), createdAt: new Date().toISOString() });
+    const duplicate = state.cases.find((item) => item.sessionId === state.selectedId && item.status === "待审核");
+    if (duplicate) return showToast("当前会话已经有待审核候选案例。", true);
+    state.cases.unshift(experience.createCandidate(a, state.selectedId));
     saveStorage("zhimei-cases", state.cases);
-    showToast("候选案例已生成，审核前不会进入正式推荐库。", false);
+    state.experienceView = { query: "", status: "待审核" };
+    state.copilotView.screen = "experience";
+    showToast("候选案例已生成，审核发布前不会参与正式推荐。", false);
     renderDashboard();
   }
   function updateCase(id, status) {
     const item = state.cases.find((entry) => entry.id === id);
     if (!item) return;
     item.status = status;
+    if (status === "已审核" || status === "已发布") {
+      item.reviewedBy = "当前演示账号";
+      item.ruleVersion = item.ruleVersion === "待审核确认" ? "演示规则 2026.05" : item.ruleVersion;
+      item.validUntil = item.validUntil === "待审核确认" ? "2027-05-31" : item.validUntil;
+      state.experienceView = { query: item.id, status: "已发布" };
+    } else if (status === "停止推荐" || status === "已失效") {
+      state.experienceView = { query: item.id, status: "已失效" };
+    }
     saveStorage("zhimei-cases", state.cases);
-    showToast(`案例状态已更新为“${status}”。`, false);
+    showToast(`案例状态已更新为“${status === "已审核" ? "已发布" : status}”。`, false);
     renderDashboard();
   }
 

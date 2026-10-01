@@ -22,6 +22,8 @@ test("S00018 detects the shade record conflict without claiming real-world mis-s
   assert.ok(result.conflicts.some((item) => item.detail.includes("不能认定已经再次错发")));
   assert.equal(result.riskLevel, "高");
   assert.ok(result.request.includes("消费者反馈"));
+  assert.ok(result.request.includes("更换为 #05枫叶红"));
+  assert.ok(!result.request.includes("枫叶红不适合"));
   assert.notEqual(result.request, result.messages.filter((item) => item["角色"] === "买家").at(-1)["message_text"]);
 });
 
